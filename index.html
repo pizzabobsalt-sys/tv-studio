@@ -471,6 +471,8 @@ input[type=range]{width:100%;accent-color:var(--p);height:28px}
 .pic canvas{position:absolute;inset:0;width:100%;height:100%;display:none;background:#000}
 .seg3{grid-template-columns:1fr 1fr 1fr}
 .seg3 .btn{padding:9px 4px}
+.seg4{grid-template-columns:repeat(4,1fr)}
+.seg4 .btn{padding:9px 4px}
 
 /* loading + offline screens */
 #loading{position:fixed;inset:0;z-index:300;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;transition:opacity .35s ease}
@@ -601,21 +603,6 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
 .hfoot{max-width:760px;color:var(--muted);font-size:12.5px;line-height:1.5;padding:6px 4px 16px}
 @media (max-width:640px){.hq .hbody{padding-left:16px}}
 
-/* update log */
-.ulog{display:grid;gap:12px}
-.uver{border-left:3px solid var(--p);padding:2px 0 2px 12px}
-.uver h4{margin:0 0 6px;font-size:14px;font-weight:800;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.uver h4 .ubadge{font-size:10.5px;font-weight:800;border-radius:99px;padding:1px 8px;background:var(--p);color:var(--on-p);letter-spacing:.04em}
-.uver ul{margin:0;padding-left:18px;font-size:14px;line-height:1.55}
-.uver li{margin-bottom:3px}
-@media (max-height:520px){
-  #logDlg .noticebox{padding:14px 18px;gap:8px}
-  #logDlg .noticebox h3{font-size:16px}
-  #logDlg .uver ul{font-size:13px;line-height:1.4}
-  #logDlg .uver li{margin-bottom:1px}
-}
-[data-theme="holo"] .uver h4 .ubadge{border-radius:2px}
-[data-theme="neon"] .uver h4 .ubadge{border-radius:3px 8px 3px 8px}
 </style>
 </head>
 <body>
@@ -984,7 +971,7 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
         <button class="btn soft sm" data-act="pic-fit" data-v="fit">Fit</button>
         <button class="btn soft sm" data-act="pic-fit" data-v="fill">Fill</button>
         <button class="btn soft sm" data-act="pic-fit" data-v="stretch">Stretch</button>
-        <button class="btn soft sm" data-act="pic-fit" data-v="149">14:9</button>
+        <button class="btn soft sm" data-act="pic-fit" data-v="149" id="pFit149" hidden>14:9 zoom</button>
       </div>
       <button class="btn danger" data-act="pic-reset">Reset to default</button>
     </aside>
@@ -1031,17 +1018,6 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
   </div>
 </div>
 
-<!-- update log: shown once after each update, and any time from Help or Settings -->
-<div class="noticebg" id="logDlg" role="dialog" aria-modal="true" aria-labelledby="logTitle" hidden>
-  <div class="noticebox">
-    <h3 id="logTitle">WHAT&rsquo;S NEW</h3>
-    <div class="noticebody" id="logBody"></div>
-    <div class="noticebtns">
-      <button class="btn" data-act="log-close">Got it</button>
-    </div>
-  </div>
-</div>
-
 <div class="busy" id="busy"></div>
 <div id="offline">
   <svg class="nowifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16.2a5 5 0 0 1 7 0"/><circle cx="12" cy="20" r=".8" fill="currentColor"/><path d="M3 3l18 18"/></svg>
@@ -1079,7 +1055,7 @@ if(!(S.toneHz>=100&&S.toneHz<=4000))S.toneHz=TONE_DEF;
 if(!(S.adFreeUntil>0))S.adFreeUntil=0;
 if(S.monthProg>0){S.weekProg=Math.min(19,(S.weekProg||0)+S.monthProg);S.monthProg=0;} /* old 1-month pass progress carries over to the 7-day pass */
 S.stream=Object.assign({preset:'twitch',server:'rtmps://live.twitch.tv:443/app',quality:'720',remember:false,key:''},S.stream||{});
-if(!['480','720','1080'].includes(S.stream.quality))S.stream.quality='720';
+if(!['480','576','720','1080'].includes(S.stream.quality))S.stream.quality='720';
 /* migrate older loop-based channels to exact start times */
 S.channels.forEach(ch=>{
   if(!Array.isArray(ch.items))ch.items=[];
@@ -1770,49 +1746,6 @@ function pipMode(on){
 function pipButton(){const b=$('#pipBtn');if(b)b.hidden=!pipOK();}
 pipButton();
 
-/* ---------- update log ---------- */
-const APP_VERSION='1.10';
-const UPDATES=[
-  {v:'1.8',date:'17.10.2026',items:[
-    'Control menu redesigned to fit on a phone: the picture sits on the left and every section is shown at once as small cards (like OBS). Tap Tabs to switch to one section at a time',
-    'Cast to TV now only shows the channel on the TV, not your whole screen, just like Record and Stream. You can keep using the rest of the app while casting',
-    'Cast to TV can also be started and stopped from the Control menu (Capture section)',
-    'Scene transitions: Cut, Fade, Flash, Wipe and Slide (Control menu > Scenes). They also show on streams, recordings and casts',
-    'The channel preview in the Control menu is back at the top center, smaller, with the sections underneath'
-  ]},
-  {v:'1.7',date:'17.10.2026',items:[
-    'In app update log added',
-    'Recording/streaming the channel doesnt share your whole screen, it only shows the channel',
-    'Added a control menu, thats pretty awesome and has a bunch of features',
-    'Fixed the timer feature',
-    'Added animated screenbugs',
-    'Text scaling works normally',
-    'UI improved',
-    'improved the screenbug menu',
-    'and more'
-  ]}
-];
-const LOG_ID=()=>UPDATES[0].v+'@'+UPDATES[0].date;
-function logHtml(){
-  return '<div class="ulog">'+UPDATES.map((u,i)=>`<div class="uver"><h4>${esc(u.date)} <span class="ubadge">v${esc(u.v)}${i===0?' &middot; LATEST':''}</span></h4><ul>${u.items.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`).join('')+'</div>';
-}
-/* force=true opens it on purpose; otherwise it only opens once after an update */
-function openLog(force){
-  if(RENDER||LOADING)return;
-  if(!force){
-    if(S.seenLog===LOG_ID())return;
-    if(!S.channels.length){S.seenLog=LOG_ID();save();return;} /* a brand new install has nothing to compare with */
-    if(!$('#noticeDlg').hidden)return;
-  }
-  $('#logTitle').textContent=force?'UPDATE LOG':'WHAT\u2019S NEW';
-  const b=$('#logBody'); b.innerHTML=logHtml(); b.scrollTop=0;
-  $('#logDlg').hidden=false;
-}
-function closeLog(){
-  $('#logDlg').hidden=true;
-  if(S.seenLog!==LOG_ID()){S.seenLog=LOG_ID();save();}
-}
-
 /* ---------- help tab ---------- */
 const HELP_QUICK=[
   'Open the <b>Channels</b> tab and tap <b>+ New channel</b>.',
@@ -1822,7 +1755,6 @@ const HELP_QUICK=[
 ];
 /* [icon, title, open by default, html] */
 const HELP_SECTIONS=[
-  ['\u{1F4DC}','Update log',true,'__LOG__'],
   ['\u{1F4FA}','Channels and videos',false,`
     <p>A channel is one TV station. You can make as many as you like, reorder them with the arrows on the channel card, and <b>Duplicate</b> or <b>Delete</b> them.</p>
     <ul>
@@ -1917,11 +1849,11 @@ const HELP_SECTIONS=[
 ];
 function helpSectionHtml(s){
   const [ico,title,open,body]=s;
-  return `<details class="hq"${open?' open':''}><summary><span class="hico">${ico}</span>${esc(title)}</summary><div class="hbody">${body==='__LOG__'?logHtml():body}</div></details>`;
+  return `<details class="hq"${open?' open':''}><summary><span class="hico">${ico}</span>${esc(title)}</summary><div class="hbody">${body}</div></details>`;
 }
 function renderHelp(){
   const el=$('#help');
-  el.innerHTML=`<div class="section-title"><h2>Help</h2><button class="btn soft sm" data-act="log-open">What&rsquo;s new</button></div>
+  el.innerHTML=`<div class="section-title"><h2>Help</h2></div>
   <div class="hsearch"><input class="name-in" id="helpQ" type="search" placeholder="Search help (try: stream, timer, sound)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search help"></div>
   <div class="hcard" id="helpQuick"><h3>Quick start</h3><ol class="hsteps">${HELP_QUICK.map(t=>`<li><span>${t}</span></li>`).join('')}</ol></div>
   <div id="helpList">${HELP_SECTIONS.map(helpSectionHtml).join('')}</div>
@@ -1993,7 +1925,6 @@ function renderSettings(){
     <div class="set-row"><div style="min-width:0"><div class="rtitle">Clear all data</div><div class="rsub">Removes every channel, video and on screen graphic from TV Studio</div></div><button class="btn danger sm" data-act="wipe">Clear all</button></div>
   </div>
   <div class="setgroup"><h3>About</h3>
-    <div class="set-row"><div style="min-width:0"><div class="rtitle">Update log</div><div class="rsub">Version ${esc(APP_VERSION)}. See what changed in each update</div></div><button class="btn soft sm" data-act="log-open">View</button></div>
     <div class="set-row"><div class="rsub" style="margin:0;line-height:1.5">TV Studio keeps your videos on this device and needs an internet connection to run. Videos you add are copied into the app\u2019s own storage, so they keep airing even if you delete them from your gallery. Clearing your browser\u2019s site data removes them. If you stream a channel to another platform you are responsible for what you broadcast: read the warning on the Go live screen.</div></div>
   </div>
   <div class="credit">Made by @bertrambertofferson on tiktok and HUUUUGE Credit to Claude</div>`;
@@ -2538,7 +2469,7 @@ function renderStream(){
     <div class="sfield"><label>Platform</label><div class="seg seg3">${PLATFORMS.map(p=>`<button class="btn sm${f.preset===p[0]?'':' soft'}" data-act="stream-preset" data-v="${p[0]}">${p[1]}</button>`).join('')}</div></div>
     <div class="sfield"><label for="stServer">Server address</label><input class="name-in" id="stServer" type="text" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="rtmps://..." value="${esc(f.server)}">${pre[3]?`<div class="hint" style="margin:0">${esc(pre[3])}</div>`:''}</div>
     <div class="sfield"><label for="stKey">Stream key</label><div class="keyrow"><input class="name-in" id="stKey" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="Paste your stream key" value="${esc(STR.key)}"><button class="btn soft sm" data-act="stream-showkey" id="stShow">Show</button></div><div class="hint" style="margin:0">Keep your stream key secret. Anyone who has it can broadcast to your channel.</div></div>
-    <div class="sfield"><label>Quality</label><div class="seg seg3">${['480','720','1080'].map(q=>`<button class="btn sm${f.quality===q?'':' soft'}" data-act="stream-q" data-v="${q}">${q}p</button>`).join('')}</div></div>
+    <div class="sfield"><label>Quality</label><div class="seg seg4">${['480','576','720','1080'].map(q=>`<button class="btn sm${f.quality===q?'':' soft'}" data-act="stream-q" data-v="${q}">${q}p</button>`).join('')}</div></div>
     <label class="chk" style="margin-bottom:14px"><input type="checkbox" id="stRem"${f.remember?' checked':''}> Remember my stream key on this device</label>
     ${STREAM_WARN}
     <label class="chk" style="margin-bottom:24px"><input type="checkbox" id="stAck"${STR.ack?' checked':''}> I have read and understand this warning</label>`;
@@ -2757,11 +2688,17 @@ const P={ch:null,token:0,key:null,mode:'',muted:RENDER?false:!!S.startMuted,unde
 const vid=$('#vid'),vcan=$('#vcan'),vctx=vcan.getContext('2d');
 /* ===== v1.9 additions: NTSC>PAL speed-up, audio/sub tracks, backup, M3U8, TS recording ===== */
 let XA=null,SUBT=null,WR=null;
+const langName=c=>{if(!c)return '';try{return new Intl.DisplayNames([navigator.language||'en'],{type:'language'}).of(c)||c;}catch(e){return c;}};
 const xa=()=>XA||(XA=Object.assign(document.createElement('audio'),{preload:'auto'}));
 const xaOn=()=>!!(P.cur&&typeof P.cur.aud==='string'&&P.cur.aud[0]==='x');
 const ntscRate=it=>{const m=S.ntsc;return (m==='all'||(m==='auto'&&it&&it.ntsc))?1.04:1;};
 function setPitch(el,keep){['preservesPitch','webkitPreservesPitch','mozPreservesPitch'].forEach(k=>{try{el[k]=keep;}catch(e){}});}
-function rateApply(it){const r=ntscRate(it),k=((it&&it.pitch)||S.ntscPitch)!=='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,k);});}
+function mkShift(ctx,r){const W=0.1,T=W/(r-1),n=Math.round(T*ctx.sampleRate),inp=ctx.createGain(),out=ctx.createGain(),dB=ctx.createBuffer(1,n,ctx.sampleRate),gB=ctx.createBuffer(1,n,ctx.sampleRate),d=dB.getChannelData(0),g=gB.getChannelData(0);
+  for(let i=0;i<n;i++){const ph=i/n;d[i]=W*(1-ph);g[i]=1-Math.abs(2*ph-1);}
+  [0,0.5].forEach(o=>{const dl=ctx.createDelay(1),gn=ctx.createGain(),s1=ctx.createBufferSource(),s2=ctx.createBufferSource();dl.delayTime.value=0;gn.gain.value=0;s1.buffer=dB;s2.buffer=gB;s1.loop=s2.loop=true;s1.connect(dl.delayTime);s2.connect(gn.gain);inp.connect(dl);dl.connect(gn);gn.connect(out);s1.start(0,o*T);s2.start(0,o*T);});
+  return{inp,out};}
+/* once an element is routed through Web Audio (recording), the browser's own pitch switch can't be trusted there, so the element always keeps NTSC pitch and PAL pitch is made by the shifter above */
+function rateApply(it){const r=ntscRate(it),pal=r!==1&&((it&&it.pitch)||S.ntscPitch)==='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,el._s?true:!pal);if(el._d){el._d.gain.value=pal?0:1;el._p.gain.value=pal?1:0;}});}
 function detectFps(u){return new Promise(res=>{const v=document.createElement('video');if(!v.requestVideoFrameCallback)return res(0);v.muted=true;v.playsInline=true;const m=[],end=r=>{clearTimeout(t);try{v.pause();v.removeAttribute('src');v.load();}catch(e){}res(r);},t=setTimeout(()=>end(0),7000);
   const cb=(n,md)=>{m.push(md.mediaTime);if(m.length>=8){const d=(m[m.length-1]-m[0])/(m.length-1);return end(d>0?1/d:0);}v.requestVideoFrameCallback(cb);};
   v.onloadeddata=()=>{v.requestVideoFrameCallback(cb);v.play().catch(()=>end(0));};v.onerror=()=>end(0);v.src=u;});}
@@ -2779,11 +2716,11 @@ async function applyTracks(it){
   if(x){if(e._f!==x.fileId){e.src=await getURL(x.fileId);e._f=x.fileId;}}else{e.pause();e.removeAttribute('src');e._f=null;}
   rateApply(it);applyVol();
   SUBT=null;[...vid.querySelectorAll('track')].forEach(t=>t.remove());
-  for(const s of it.xs||[]){const b=await getFile(s.fileId);if(!b)continue;let tx=await b.text();if(!/^\uFEFF?WEBVTT/.test(tx))tx='WEBVTT\n\n'+tx.replace(/\r/g,'').replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g,'$1.$2');const tr=document.createElement('track');tr.kind='subtitles';tr.label=s.name;tr.src=URL.createObjectURL(new Blob([tx],{type:'text/vtt'}));vid.appendChild(tr);tr.track.mode='hidden';}
+  for(const s of it.xs||[]){const b=await getFile(s.fileId);if(!b)continue;let tx=await b.text();if(!/^\uFEFF?WEBVTT/.test(tx))tx='WEBVTT\n\n'+tx.replace(/\r/g,'').replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g,'$1.$2');const tr=document.createElement('track');tr.kind='subtitles';tr.label=s.name;tr.srclang=s.lang||'';tr.src=URL.createObjectURL(new Blob([tx],{type:'text/vtt'}));vid.appendChild(tr);tr.track.mode='hidden';}
   const ts=[...vid.textTracks];let s=it.sub;if(s===undefined&&pf.slang)s=ts.findIndex(t=>t.language===pf.slang);
-  ts.forEach(t=>{if(t.mode!=='disabled')t.mode='disabled';});if(s>=0&&ts[s]){ts[s].mode='hidden';SUBT=ts[s];}
+  ts.forEach(t=>{t.mode=WR?'hidden':'disabled';});if(s>=0&&ts[s]){ts[s].mode='hidden';SUBT=ts[s];}
 }
-function subDraw(){const c=SUBT&&SUBT.activeCues;if(!c||!c.length)return;const cw=vcan.width,H=vcan.height,fs=Math.round(H*0.055),L=[];vctx.font='700 '+fs+'px Inter,sans-serif';vctx.textAlign='center';vctx.textBaseline='bottom';vctx.lineWidth=fs/6;vctx.lineJoin='round';vctx.strokeStyle='#000';vctx.fillStyle='#fff';[...c].forEach(q=>L.push(...String(q.text).replace(/<[^>]+>/g,'').split('\n')));let y=H-fs*0.8;for(let i=L.length-1;i>=0;i--){vctx.strokeText(L[i],cw/2,y);vctx.fillText(L[i],cw/2,y);y-=fs*1.2;}}
+function subDraw(X,cw0,H0){X=X||vctx;const c=SUBT&&SUBT.activeCues;if(!c||!c.length)return;const cw=cw0||vcan.width,H=H0||vcan.height,fs=Math.round(H*0.055),L=[];X.font='700 '+fs+'px Inter,sans-serif';X.textAlign='center';X.textBaseline='bottom';X.lineWidth=fs/6;X.lineJoin='round';X.strokeStyle='#000';X.fillStyle='#fff';[...c].forEach(q=>L.push(...String(q.text).replace(/<[^>]+>/g,'').split('\n')));let y=H-fs*0.8;for(let i=L.length-1;i>=0;i--){X.strokeText(L[i],cw/2,y);X.fillText(L[i],cw/2,y);y-=fs*1.2;}}
 function xaSync(){const e=XA;if(!e||!e._f)return;if(!xaOn()||vid.paused||P.mode!=='video'){if(!e.paused)e.pause();return;}if(Math.abs(e.currentTime-vid.currentTime)>0.35){try{e.currentTime=vid.currentTime;}catch(_){}}if(e.paused)e.play().catch(()=>{});}
 $('#schedList').addEventListener('change',e=>{const t=e.target.closest&&e.target.closest('.pt');if(t&&SC)SC.entries[+t.closest('.srow').dataset.i].pitch=t.value;});
 vid.addEventListener('timeupdate',xaSync);vid.addEventListener('pause',xaSync);vid.addEventListener('seeked',xaSync);
@@ -2791,13 +2728,13 @@ function pickFiles(accept,multi){return new Promise(res=>{const i=document.creat
 function openTracks(){
   const it=P.cur,ch=P.ch;if(!it||!ch){toast('Play a video first');return;}
   let o=$('#trkDlg');if(!o){o=document.createElement('div');o.id='trkDlg';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);display:grid;place-items:center';document.body.appendChild(o);o.addEventListener('click',trkClick);}
-  const at=vid.audioTracks,ts=[...vid.textTracks],lab=(t,i)=>esc(t.label||t.language||'Track '+(i+1))+(t.language&&t.label?' ('+esc(t.language)+')':'');
+  const at=vid.audioTracks,ts=[...vid.textTracks],lab=(t,i)=>esc(t.label||'Track '+(i+1))+(t.language?' · '+esc(langName(t.language)):'');
   const b=(a,v,txt,on)=>`<button class="btn sm${on?'':' soft'}" data-t="${a}" data-v="${v}" style="margin:3px">${txt}</button>`;
   const ea=at&&at.length?[...at].findIndex(t=>t.enabled):-1,ca=it.aud||(ea>=0?'e:'+ea:'');
   const cs=it.sub===undefined?ts.findIndex(t=>t.mode!=='disabled'):it.sub;
   let h=`<div style="background:#1c1c1e;color:#fff;max-width:560px;width:92%;max-height:88vh;overflow:auto;padding:16px;border-radius:16px;font:14px Inter,sans-serif"><b>Audio &amp; subtitles</b><div style="opacity:.7;margin-bottom:8px">${esc(it.name)}</div><b>Audio</b><br>`;
   if(at&&at.length)for(let i=0;i<at.length;i++)h+=b('a','e:'+i,lab(at[i],i),ca==='e:'+i);else h+='<div style="opacity:.7">This browser can\u2019t list the audio tracks inside a video file. You can still add your own below.</div>';
-  (it.xa||[]).forEach((x,i)=>{h+=b('a','x:'+i,'+ '+esc(x.name),ca==='x:'+i);});
+  (it.xa||[]).forEach((x,i)=>{h+=b('a','x:'+i,'+ '+esc(x.name)+(x.lang?' · '+esc(langName(x.lang)):''),ca==='x:'+i);});
   h+=b('addA','','Add audio (MP3 or video)…',0)+'<br><b>Subtitles</b><br>'+b('s','-1','Off',cs<0);
   ts.forEach((t,i)=>{h+=b('s',i,lab(t,i),cs===i);});
   h+=b('addS','','Add subtitles (.srt / .vtt)…',0)+'<br><br>'+b('chan','','Use these choices for the whole channel',0)+b('x','','Close',0)+'</div>';
@@ -2809,7 +2746,7 @@ async function trkClick(e){
   if(k==='x'){o.style.display='none';return;}
   if(k==='a')it.aud=v;
   else if(k==='s')it.sub=+v;
-  else if(k==='addA'||k==='addS'){const fs=await pickFiles(k==='addA'?'audio/*,video/*,.mp3,.m4a,.aac,.ac3,.mka':'.srt,.vtt',false);if(!fs.length)return;const f=fs[0],fid=uid();await putFile(fid,f);const r={fileId:fid,name:nameStr(f.name)};
+  else if(k==='addA'||k==='addS'){const fs=await pickFiles(k==='addA'?'audio/*,video/*,.mp3,.m4a,.aac,.ac3,.mka':'.srt,.vtt',false);if(!fs.length)return;const f=fs[0],fid=uid();await putFile(fid,f);const g=(/[._-]([a-z]{2,3})\.[^.]+$/i.exec(f.name)||[])[1]||'',lg=(prompt('Language of this track (for example en, fr, es). Leave empty if unknown.',g)||'').trim().toLowerCase(),r={fileId:fid,name:nameStr(f.name),lang:lg};
     if(k==='addA'){it.xa=(it.xa||[]).concat(r);it.aud='x:'+(it.xa.length-1);}else{it.xs=(it.xs||[]).concat(r);await applyTracks(it);it.sub=[...vid.textTracks].length-1;}}
   else if(k==='chan'){const at=vid.audioTracks,ts=[...vid.textTracks],pf={};const a=it.aud&&it.aud[0]==='e'?+it.aud.slice(2):-1;if(a>=0&&at&&at[a]){pf.idx=a;if(at[a].language)pf.lang=at[a].language;}if(it.sub>=0&&ts[it.sub]&&ts[it.sub].language)pf.slang=ts[it.sub].language;P.ch.trkPref=pf;
     P.ch.items.forEach(x=>{delete x.aud;delete x.sub;});save();toast('Saved for this channel');}
@@ -2818,7 +2755,16 @@ async function trkClick(e){
 /* backup */
 async function backup(media){
   const cfg=JSON.parse(JSON.stringify(S));cfg.stream.key='';cfg.stream.remember=false;
-  if(!media){exportFile('tvstudio-backup.json','application/json',JSON.stringify({tvstudio:1,S:cfg}));return;}
+  if(!media){
+    /* settings-only backup: still embed the screenbug images/GIFs and fonts (small) so the graphics survive */
+    const need=new Set(),fonts=new Set(),add=l=>(l||[]).forEach(b=>{if(!b)return;if(b.type==='text'){if(b.font)fonts.add(b.font);}else if(b.type!=='video'&&b.fileId)need.add(b.fileId);});
+    cfg.channels.forEach(c=>{add(c.bugs);(c.scenes||[]).forEach(x=>x&&x.data&&add(x.data.bugs));});
+    (cfg.fonts||[]).forEach(f=>{if(f.fileId&&fonts.has(f.id))need.add(f.fileId);});
+    showBusy('Building backup…');const bugFiles={};
+    const toURL=bl=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(bl);});
+    for(const id of need){try{const bl=isNat(id)?await (await fetch(nativeUrl(id))).blob():await getFile(id);if(bl)bugFiles[id]={type:bl.type,data:await toURL(bl)};}catch(e){}}
+    hideBusy();
+    exportFile('tvstudio-backup.json','application/json',JSON.stringify({tvstudio:1,S:cfg,bugFiles}));return;}
   showBusy('Building backup…');const ids=new Set();JSON.stringify(cfg,(k,v)=>{if(k==='fileId'&&v)ids.add(v);return v;});
   const parts=[],files=[];
   for(const id of ids){try{const bl=isNat(id)?await (await fetch(nativeUrl(id))).blob():await getFile(id);if(bl){files.push({id,size:bl.size,type:bl.type});parts.push(bl);}}catch(e){}}
@@ -2831,21 +2777,33 @@ async function restore(){
   try{showBusy('Restoring…');let D,miss=true;const head=new Uint8Array(await f.slice(0,8).arrayBuffer());
     if(String.fromCharCode(...head.slice(0,4))==='TVSB'){const n=new DataView(head.buffer).getUint32(4),h=JSON.parse(await f.slice(8,8+n).text());let p=8+n,txt=JSON.stringify(h.S);
       for(const x of h.files){const nid=uid();await putFile(nid,f.slice(p,p+x.size,x.type));p+=x.size;txt=txt.split('"'+x.id+'"').join('"'+nid+'"');}D=JSON.parse(txt);miss=false;}
-    else D=JSON.parse(await f.text()).S;
-    D.channels.forEach(c=>{c.id=uid();});S.channels.push(...D.channels);(D.fonts||[]).forEach(x=>{if(!S.fonts.some(g=>g.fileId===x.fileId))S.fonts.push(x);});
+    else{const J=JSON.parse(await f.text());D=J.S;const bf=J.bugFiles;
+      if(bf&&Object.keys(bf).length){let txt=JSON.stringify(D);
+        for(const id in bf){try{const x=bf[id],m=/^data:([^;,]*)(;base64)?,(.*)$/s.exec(x.data||'');if(!m)continue;const bin=m[2]?atob(m[3]):decodeURIComponent(m[3]),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+          const nid=uid();await putFile(nid,new Blob([u],{type:x.type||m[1]||'application/octet-stream'}));txt=txt.split('"'+id+'"').join('"'+nid+'"');}catch(e){}}
+        D=JSON.parse(txt);}}
+    D.channels.forEach(c=>{c.id=uid();});S.channels.push(...D.channels);(D.fonts||[]).forEach(x=>{if(!S.fonts.some(g=>g.id===x.id||g.fileId===x.fileId))S.fonts.push(x);});
     save();hideBusy();renderSettings();toast(`Restored ${D.channels.length} channel${D.channels.length===1?'':'s'}`+(miss?'. This backup has no videos: add them again':''),5000);
   }catch(e){hideBusy();toast('Couldn\u2019t read that backup',4000);}
 }
-function exportM3u(id){const ch=getCh(id);if(!ch)return;const l=weekAirings(ch,Date.now()),src=l.length?l.map(o=>o.it):ch.items;
-  let t='#EXTM3U\n#PLAYLIST:'+ch.name+'\n';src.forEach(it=>{t+=`#EXTINF:${Math.round(it.duration)},${it.name}\n${mediaBase?mediaBase+it.fileId:(it.orig||it.name)}\n`;});
-  exportFile(String(ch.name).replace(/[^\w\- ]+/g,'_')+'.m3u8','application/vnd.apple.mpegurl',t);}
+async function exportM3u(id){const ch=getCh(id);if(!ch)return;
+  if(!(navigator.serviceWorker&&navigator.serviceWorker.controller)){toast('The link needs the app\u2019s offline mode. Reload the app once and try again.',4500);return;}
+  const l=weekAirings(ch,Date.now()),src=l.length?l.map(o=>o.it):ch.items,mb=new URL('m3u/media/',location.href).href;
+  let t='#EXTM3U\n#PLAYLIST:'+ch.name+'\n';const U=id=>mediaBase?mediaBase+id:mb+encodeURIComponent(id);
+  src.forEach(it=>{const sl=[...(it.xa||[]).map(x=>U(x.fileId)),...(it.xs||[]).map(x=>U(x.fileId)+'?s=1')];
+    t+=`#EXTINF:${Math.round(it.duration)},${it.name}\n`;(it.xa||[]).forEach(x=>{t+=`# extra audio: ${x.name} [${x.lang||'und'}]\n`;});(it.xs||[]).forEach(x=>{t+=`# extra subtitles: ${x.name} [${x.lang||'und'}]\n`;});
+    if(sl.length)t+='#EXTVLCOPT:input-slave='+sl.join('#')+'\n';t+=U(it.fileId)+'\n';});
+  const url=new URL('m3u/'+encodeURIComponent(ch.id)+'.m3u8',location.href).href;
+  try{const c=await caches.open('m3u-cache');await c.put(url,new Response(t,{headers:{'Content-Type':'application/vnd.apple.mpegurl','Access-Control-Allow-Origin':'*'}}));}catch(e){toast('Couldn\u2019t make the link',4000);return;}
+  try{await navigator.clipboard.writeText(url);toast('M3U8 link copied',3500);}catch(e){prompt('Copy this M3U8 link',url);}
+}
 function vaGroup(){return `<div class="setgroup"><h3>Video &amp; audio</h3>
   ${setRow('NTSC to PAL speed-up','Plays NTSC film (24 fps) videos 4% faster, like PAL TV, so they air 4% shorter. \u201cAll videos\u201d speeds up everything.','ntsc',[['off','Off'],['auto','24 fps videos'],['all','All videos']],S.ntsc||'off')}
   ${setRow('Pitch when sped up','Keep the original NTSC pitch, or let the sound rise to PAL pitch','ntscPitch',[['keep','Keep NTSC pitch'],['pal','PAL pitch']],S.ntscPitch||'keep')}
   <div class="set-row"><div class="rsub" style="margin:0">While a channel plays, tap <b>Tracks</b> to pick the audio and subtitles, or add your own audio and subtitle files.</div></div></div>`;}
 function xRows(){return `<div class="set-row"><div style="min-width:0"><div class="rtitle">Backup channels</div><div class="rsub">Settings only (small), or with every video (big file)</div></div><div class="set-btns"><button class="btn soft sm" data-act="bk-cfg">Settings</button><button class="btn soft sm" data-act="bk-all">With videos</button></div></div>
   <div class="set-row"><div style="min-width:0"><div class="rtitle">Restore a backup</div><div class="rsub">Adds the channels from a backup file</div></div><button class="btn soft sm" data-act="bk-restore">Restore</button></div>
-  ${S.channels.length?`<div class="set-row"><div style="min-width:0"><div class="rtitle">Channel playlist (M3U8)</div><div class="rsub">A playlist of what airs on a channel, for VLC and other players</div></div><div class="set-btns">${S.channels.map(c=>`<button class="btn soft sm" data-act="m3u" data-id="${c.id}">${esc(c.name)}</button>`).join('')}</div></div>`:''}`;}
+  ${S.channels.length?`<div class="set-row"><div style="min-width:0"><div class="rtitle">Channel M3U8 link</div><div class="rsub">Copies a link to a playlist of what airs on a channel. It works on this device and browser only, because TV Studio has no server</div></div><div class="set-btns">${S.channels.map(c=>`<button class="btn soft sm" data-act="m3u" data-id="${c.id}">${esc(c.name)}</button>`).join('')}</div></div>`:''}`;}
 /* record to .ts: MediaRecorder (MP4/H.264) remuxed to MPEG-TS */
 function tsMux(){
   const blobs=[];let cur=[],buf=new Uint8Array(0),trk={},cc={};const T0=90000;
@@ -2900,14 +2858,41 @@ async function webRec(){
   if(!mt){toast('This browser can\u2019t record H.264. Use a recent Chrome, Edge or Safari to record .ts files.',5000);return;}
   try{
     AC=AC||new (window.AudioContext||window.webkitAudioContext)();await AC.resume();xa();
-    const dest=AC.createMediaStreamDestination();[vid,XA].forEach(el=>{if(!el._s){el._s=AC.createMediaElementSource(el);el._s.connect(AC.destination);}el._s.connect(dest);});
-    const st=new MediaStream([...vcan.captureStream(30).getVideoTracks(),...dest.stream.getAudioTracks()]),mr=new MediaRecorder(st,{mimeType:mt,videoBitsPerSecond:5e6,audioBitsPerSecond:160e3}),mx=tsMux();
-    WR={mr,dest,q:Promise.resolve(),name:ch.name};
+    const dest=AC.createMediaStreamDestination();[vid,XA].forEach(el=>{if(!el._s){el._s=AC.createMediaElementSource(el);const sh=mkShift(AC,1.04);el._d=AC.createGain();el._p=AC.createGain();el._s.connect(el._d);el._s.connect(sh.inp);sh.out.connect(el._p);el._d.connect(AC.destination);el._p.connect(AC.destination);}el._d.connect(dest);el._p.connect(dest);});if(P.cur)rateApply(P.cur);
+    const d=P.dims||[Math.round(720*ratioOf(ch))&~1,720],rc=document.createElement('canvas');rc.width=d[0];rc.height=d[1];const X=rc.getContext('2d'),st=new MediaStream([...rc.captureStream(30).getVideoTracks(),...dest.stream.getAudioTracks()]),mr=new MediaRecorder(st,{mimeType:mt,videoBitsPerSecond:5e6,audioBitsPerSecond:160e3}),mx=tsMux();
+    WR={mr,dest,q:Promise.resolve(),name:ch.name,tm:setInterval(()=>recFrame(X,rc.width,rc.height),33),subs:{},t0:Date.now(),map:null};
+    [...vid.textTracks].forEach(t=>{t.mode='hidden';});if(P.cur&&P.mode==='video')recMap(vid.currentTime,ntscRate(P.cur));
     mr.ondataavailable=e=>{if(e.data&&e.data.size)WR.q=WR.q.then(async()=>mx.push(new Uint8Array(await e.data.arrayBuffer())));};
-    mr.onstop=async()=>{const w=WR;await w.q;[vid,XA].forEach(el=>{try{el._s.disconnect(w.dest);}catch(e){}});saveBlob(mx.end(),String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-')+'.ts');WR=null;const b=$('#recBtn');if(b)b.textContent='Record';toast('Recording saved as .ts');};
+    mr.onstop=async()=>{const w=WR;clearInterval(w.tm);await w.q;recSnap();[vid,XA].forEach(el=>{try{el._d.disconnect(w.dest);el._p.disconnect(w.dest);}catch(e){}});const fn=String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-');saveBlob(mx.end(),fn+'.ts');recSubs(w,fn);WR=null;const b=$('#recBtn');if(b)b.textContent='Record';toast('Recording saved as .ts');};
     mr.start(1000);const b=$('#recBtn');if(b)b.textContent='Stop rec';toast('Recording .ts. It records what you hear and the picture, so keep sound on. Tap Record again to stop.',5000);
   }catch(e){WR=null;toast('Couldn\u2019t start recording',4000);}
 }
+function recMap(off,r){if(WR)WR.map={w0:Date.now()-off/r*1000,r};}
+function recSnap(){const w=WR;if(!w||!w.map)return;[...vid.textTracks].forEach((t,i)=>{if(!t.cues)return;const k=(t.language||t.label||'sub'+(i+1)).replace(/[^\w-]+/g,'_');(w.subs[k]=w.subs[k]||[]).push(...[...t.cues].map(c=>({s:w.map.w0+c.startTime/w.map.r*1000-w.t0,e:w.map.w0+c.endTime/w.map.r*1000-w.t0,x:c.text})));});w.map=null;}
+function recSubs(w,fn){const p=(n,l)=>String(n).padStart(l,'0'),f=ms=>{ms=Math.max(0,Math.round(ms));return `${p(Math.floor(ms/3600000),2)}:${p(Math.floor(ms/60000)%60,2)}:${p(Math.floor(ms/1000)%60,2)}.${p(ms%1000,3)}`;};
+  Object.entries(w.subs).forEach(([k,a])=>{a=a.filter(c=>c.e>0).sort((x,y)=>x.s-y.s);if(a.length)saveBlob(new Blob(['WEBVTT\n\n'+a.map(c=>f(c.s)+' --> '+f(c.e)+'\n'+c.x).join('\n\n')+'\n'],{type:'text/vtt'}),fn+'.'+k+'.vtt');});}
+function recFrame(X,cw,chh){
+  X.globalAlpha=1;X.globalCompositeOperation='source-over';X.shadowColor='transparent';X.fillStyle='#000';X.fillRect(0,0,cw,chh);
+  if(P.mode==='video'&&vid.videoWidth){const vw=vid.videoWidth,vh=vid.videoHeight,fit=P.ch&&P.ch.fit;try{
+    if(fit==='stretch')X.drawImage(vid,0,0,cw,chh);
+    else if(fit==='149'&&z149(cw,chh,vw/vh)){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;X.save();X.beginPath();X.rect((cw-bw)/2,(chh-bh)/2,bw,bh);X.clip();X.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);X.restore();}
+    else{const k=fit==='fill'?Math.max(cw/vw,chh/vh):Math.min(cw/vw,chh/vh),w=vw*k,h=vh*k;X.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);}
+  }catch(e){}}
+  else if(P.mode==='bars'){['#c0c0c0','#c0c000','#00c0c0','#00c000','#c000c0','#c00000','#0000c0'].forEach((q,i)=>{X.fillStyle=q;X.fillRect(i*cw/7,0,cw/7+1,chh);});}
+  subDraw(X,cw,chh);drawBugs(X,cw);
+}
+/* paints the on screen graphics (logos, text, clocks, GIFs, videos) where they sit on the picture */
+function drawBugs(X,cw){const pic=$('#pic'),pr=pic.getBoundingClientRect();if(!pr.width)return;const k=cw/pr.width;
+  pic.querySelectorAll('.bug').forEach(e=>{const cs=getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return;
+    const r=e.getBoundingClientRect(),x=(r.left-pr.left)*k,y=(r.top-pr.top)*k,w=r.width*k,h=r.height*k;
+    X.save();X.globalAlpha=Math.max(0,Math.min(1,parseFloat(cs.opacity)));X.globalCompositeOperation=cs.mixBlendMode==='screen'?'screen':'source-over';
+    try{
+      if(e.classList.contains('btxt')){const sp=e.firstChild;if(sp){X.beginPath();X.rect(x,y,w,h);X.clip();const fs=parseFloat(cs.fontSize)*k,lh=fs*1.15,sr=sp.getBoundingClientRect();
+        X.font=`${cs.fontWeight} ${fs}px ${cs.fontFamily}`;X.fillStyle=cs.color;X.textAlign='center';X.textBaseline='middle';X.shadowColor='rgba(0,0,0,.6)';X.shadowBlur=4*k;X.shadowOffsetY=k;
+        String(sp.textContent).split('\n').forEach((t,i)=>X.fillText(t,(sr.left-pr.left+sr.width/2)*k,(sr.top-pr.top)*k+i*lh+lh/2));}}
+      else if(e.tagName==='IMG'?e.naturalWidth:e.readyState>1)X.drawImage(e,x,y,w,h);
+    }catch(_){}
+    X.restore();});}
 function webRecStop(){try{WR.mr.stop();}catch(e){WR=null;}}
 
 function syncMuteBtn(){$('#muteBtn').textContent=P.muted?'Sound off':'Sound on';}
@@ -2928,6 +2913,15 @@ function applyVol(){
   try{const q=(!RENDER&&P.muted)||localQuiet()||chMuted();vid.muted=q||xaOn();vid.volume=chVol();if(XA){XA.muted=q;XA.volume=chVol();}}catch(e){}
   if(gainN){try{gainN.gain.value=0.06*chVol();}catch(e){}}
   tone(P.mode==='bars');
+}
+/* safety net for "mute" videos: re-assert the sound state, make sure an audio track is on, and wake a suspended audio engine */
+function fixAudio(){
+  try{
+    const at=vid.audioTracks; if(at&&at.length&&![...at].some(x=>x.enabled))at[0].enabled=true;
+    const q=(!RENDER&&P.muted)||localQuiet()||chMuted();
+    if(vid.muted!==(q||xaOn())||Math.abs(vid.volume-chVol())>0.001)applyVol();
+    if(AC&&AC.state==='suspended'&&(vid._s||(XA&&XA._s)))AC.resume().catch(()=>{});
+  }catch(e){}
 }
 function tone(on){
   try{
@@ -2950,7 +2944,9 @@ function setMode(m){
 }
 /* ---- per-channel picture: aspect ratio, resolution, fit ---- */
 const ASPECTS=[['16:9',16/9],['4:3',4/3],['21:9',21/9],['3:2',3/2],['1:1',1],['9:16',9/16]];
-const RES_LIST=[0,240,360,480,720,1080,1440];
+const RES_LIST=[0,240,360,480,576,720,1080,1440];
+/* 14:9 zoom: 16:9 video in a 4:3 channel, or 4:3 video in a 16:9 channel. Anything else plays as normal Fit */
+const z149=(cw,chh,vr)=>{const c=cw/chh,w=v=>Math.abs(vr-v)<0.1;return (c>1.2&&c<1.45&&w(16/9))||(c>1.65&&c<1.9&&w(4/3));};
 const ratioOf=ch=>{const a=ASPECTS.find(x=>x[0]===(ch&&ch.aspect));return a?a[1]:16/9;};
 function picDims(ch){
   const res=ch&&ch.res||0; if(!res)return null;
@@ -2979,7 +2975,7 @@ function drawLoop(){
   vctx.fillStyle='#000'; vctx.fillRect(0,0,cw,chh);
   try{
     if(fit==='stretch')vctx.drawImage(vid,0,0,cw,chh);
-    else if(fit==='149'&&vw/vh<14/9-0.01){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;vctx.save();vctx.beginPath();vctx.rect((cw-bw)/2,(chh-bh)/2,bw,bh);vctx.clip();vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);vctx.restore();}
+    else if(fit==='149'&&z149(cw,chh,vw/vh)){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;vctx.save();vctx.beginPath();vctx.rect((cw-bw)/2,(chh-bh)/2,bw,bh);vctx.clip();vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);vctx.restore();}
     else{const k=fit==='fill'?Math.max(cw/vw,chh/vh):Math.min(cw/vw,chh/vh),w=vw*k,h=vh*k;vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);}
   }catch(e){}
   subDraw();
@@ -3043,7 +3039,7 @@ function markBad(it,bad,err){
   if(bad)toast(`Can\u2019t play \u201c${it.name}\u201d (${e}). ${/format/.test(e)?'Try a standard MP4 (H.264).':''}`,5000);
 }
 async function loadItem(info,t){
-  const it=info.item; P.cur=it; setMode('loading');
+  const it=info.item; recSnap(); P.cur=it; setMode('loading');
   let url=await getURL(it.fileId);
   if(t!==P.token)return;
   if(!url){markBad(it,true,'file is missing');setMode('bars');return;}
@@ -3054,7 +3050,7 @@ async function loadItem(info,t){
     if(t!==P.token)return; clearTimeout(wd); markBad(it,false);
     const off=(Date.now()-info.start)/1000*ntscRate(it);
     const d=vid.duration||off+1;
-    rateApply(it);applyTracks(it);if(it.ntsc===undefined&&S.ntsc!=='off')detectFps(url).then(f=>{it.ntsc=f>23.5&&f<24.5;it.srcDur=it.srcDur||it.duration;applyNtsc();});
+    rateApply(it);applyTracks(it);recMap(off,ntscRate(it));if(it.ntsc===undefined&&S.ntsc!=='off')detectFps(url).then(f=>{it.ntsc=f>23.5&&f<24.5;it.srcDur=it.srcDur||it.duration;applyNtsc();});
     try{vid.currentTime=Math.min(off,Math.max(0,d-0.3));}catch(e){}
     setMode('video'); applyVol(); if(!(P.ch&&P.ch.pausedAt)&&!OFFLINE)vid.play().catch(()=>{});
   };
@@ -3069,7 +3065,19 @@ async function loadItem(info,t){
     setMode('bars');
   };
   vid.onended=()=>{if(t===P.token&&P.mode==='video')setMode('black');};
-  vid.onplaying=()=>{setTimeout(()=>{if(t===P.token&&P.mode==='video'&&vid.videoWidth===0){markBad(it,true,'the picture format isn\u2019t supported, sound only');setMode('bars');}},1500);};
+  let synced=false;
+  vid.onplaying=()=>{
+    if(t!==P.token)return;
+    /* the first seek and start-up take a moment, so the video starts behind the clock. Catch up once, or its last seconds get cut off */
+    if(!synced){synced=true;const exp=(Date.now()-info.start)/1000*ntscRate(it);
+      if(P.mode==='video'&&isFinite(vid.duration)&&exp<vid.duration-0.3&&Math.abs(vid.currentTime-exp)>0.4){try{vid.currentTime=exp;}catch(e){}}}
+    fixAudio();
+    setTimeout(()=>{
+      if(t!==P.token||P.mode!=='video')return;
+      if(vid.videoWidth===0){markBad(it,true,'the picture format isn\u2019t supported, sound only');setMode('bars');return;}
+      if(!it._ns&&vid.currentTime>1&&!vid.paused&&!vid.muted&&vid.volume>0&&typeof vid.webkitAudioDecodedByteCount==='number'&&vid.webkitAudioDecodedByteCount===0){it._ns=1;toast('No sound from \u201c'+it.name+'\u201d. If it should have sound, its audio format may not be supported. AAC audio works best.',6000);}
+    },1500);
+  };
   vid.preload='auto';
   /* the level meter reads the sound through captureStream, which needs a CORS-clean source (the app's local video server sends the headers) */
   if(!RENDER){const loc=/^http:\/\/127\.0\.0\.1[:\/]/.test(url)||url.indexOf('/media/')===0;if(loc)vid.crossOrigin='anonymous';else vid.removeAttribute('crossorigin');}
@@ -3098,13 +3106,21 @@ async function syncPlayer(){
     return;
   }
   const key=info.item.id+'@'+info.ekey;
+  /* if the video is a moment behind the clock, let it finish (up to 2 s) instead of cutting its ending */
+  if(key!==P.key&&P.key&&P.key!=='off'&&P.mode==='video'&&P.cur&&!vid.ended&&!vid.paused&&isFinite(vid.duration)){
+    const left=(vid.duration-vid.currentTime)/ntscRate(P.cur);
+    if(!P.hold)P.hold=Date.now();
+    if(left>0.05&&left<=2&&Date.now()-P.hold<2000)return;
+  }
+  P.hold=0;
   $('#pic').classList.toggle('nobug',!!info.item.noBug);
   $('#pl1').textContent=info.item.name;
   $('#pl2').textContent=info.next?`Up next at ${clockT(info.nextStart)}: ${info.next.name}`:'Last one scheduled';
   if(key!==P.key){P.key=key;const t=++P.token;await loadItem(info,t);return;}
   if(P.mode==='video'&&vid.readyState>0&&!vid.ended){
-    if(!vid.seeking&&Math.abs(vid.currentTime-info.offset*ntscRate(info.item))>3){try{vid.currentTime=info.offset*ntscRate(info.item);}catch(e){}}
+    if(!vid.seeking&&Math.abs(vid.currentTime-info.offset*ntscRate(info.item))>2){try{vid.currentTime=info.offset*ntscRate(info.item);}catch(e){}}
     if(vid.paused)vid.play().catch(()=>{});
+    fixAudio();
   }
 }
 function stepChannel(d){
@@ -3132,12 +3148,13 @@ function paintPicEd(){
   const asp=ch.aspect||'16:9',res=ch.res||0,fit=ch.fit||'fit',d=picDims(ch);
   $('#pAspect').innerHTML=ASPECTS.map(([k])=>`<button class="btn sm${asp===k?'':' soft'}" data-act="pic-aspect" data-v="${k}">${k}</button>`).join('');
   $('#pRes').innerHTML=RES_LIST.map(r=>`<button class="btn sm${res===r?'':' soft'}" data-act="pic-res" data-v="${r}">${r?r+'p':'Auto'}</button>`).join('');
+  const b149=$('#pFit149'); if(b149)b149.hidden=asp!=='4:3'&&asp!=='16:9'; /* 14:9 zoom is for 4:3 and 16:9 channels */
   document.querySelectorAll('#pFit .btn').forEach(b=>b.classList.toggle('soft',b.dataset.v!==fit));
-  $('#picInfo').innerHTML=`${asp}<br>${d?d[0]+' &times; '+d[1]:'Device resolution'}<br><span style="font-size:.8em;opacity:.85">${fit==='fill'?'Fill (crops edges)':fit==='stretch'?'Stretch':fit==='149'?'14:9 (4:3 is cropped to 14:9)':'Fit (black bars)'}</span>`;
+  $('#picInfo').innerHTML=`${asp}<br>${d?d[0]+' &times; '+d[1]:'Device resolution'}<br><span style="font-size:.8em;opacity:.85">${fit==='fill'?'Fill (crops edges)':fit==='stretch'?'Stretch':fit==='149'?'14:9 zoom (crops to a 14:9 window)':'Fit (black bars)'}</span>`;
 }
 function picSet(act,v){
   const ch=PE&&getCh(PE.chId); if(!ch)return;
-  if(act==='pic-aspect')ch.aspect=v==='16:9'?undefined:v;
+  if(act==='pic-aspect'){ch.aspect=v==='16:9'?undefined:v; if(v!=='4:3'&&v!=='16:9'&&ch.fit==='149')ch.fit=undefined;}
   else if(act==='pic-res')ch.res=Number(v)||0;
   else ch.fit=v==='fit'?undefined:v;
   save(); paintPicEd();
@@ -3808,8 +3825,6 @@ document.addEventListener('click',e=>{
     case 'stream-q':S.stream.quality=a.dataset.v;save();renderStream();break;
     case 'stream-showkey':{const k=$('#stKey');if(k){const show=k.type==='password';k.type=show?'text':'password';a.textContent=show?'Hide':'Show';}break;}
     case 'pip':enterPip();break;
-    case 'log-open':openLog(true);break;
-    case 'log-close':closeLog();break;
     case 'help-open':{const d=a.closest('details');if(d)d.open=!d.open;break;}
     case 'notice-ok':closeNotice(false);break;
     case 'notice-hide':closeNotice(true);break;
@@ -3825,7 +3840,6 @@ document.addEventListener('click',e=>{
 if(window.TVAndroid)document.documentElement.classList.add('android');
 window.tvBack=function(){
   const open=q=>$(q).classList.contains('open');
-  if(!$('#logDlg').hidden){closeLog();return true;}
   if(open('#renameDlg')){closeRename();return true;}
   if(open('#streamEd')){if(stBusy())cancelStream();closeStreamScreen();return true;}
   if(open('#gallery')){closeGallery();return true;}
@@ -3880,7 +3894,6 @@ renderProgramming();
 function closeNotice(hide){
   $('#noticeDlg').hidden=true;
   if(hide){S.noticeHide=true;save();}
-  openLog(false);
 }
 (async function boot(){
   if(RENDER){const l=$('#loading');if(l)l.remove();return;}
@@ -3896,7 +3909,7 @@ function closeNotice(hide){
   msg.textContent='Ready';
   LOADING=false;
   const l=$('#loading'); l.classList.add('out'); setTimeout(()=>l.remove(),450);
-  if(!S.noticeHide)$('#noticeDlg').hidden=false; else openLog(false);
+  if(!S.noticeHide)$('#noticeDlg').hidden=false;
 })();
 })();
 </script>
