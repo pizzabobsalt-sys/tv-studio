@@ -928,6 +928,7 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
         <div class="clabel"><span>Capture</span><span id="cRecT"></span></div>
         <div class="crow">
           <button class="btn soft sm" data-act="rec" id="recBtn">Record</button>
+          <button class="btn soft sm" data-act="trk">Tracks</button>
           <button class="btn soft sm" data-act="stream" id="streamBtn">Stream</button>
         </div>
         <div class="clabel"><span>Cast</span></div>
@@ -1069,7 +1070,7 @@ const STR={state:'idle',live:false,liveAt:0,t:0,chId:null,err:'',ack:false,key:'
 const CAST={on:false,wait:false};
 
 /* ---------- storage ---------- */
-let S={channels:[],accent:'black',theme:'default',h12:false,newOff:'black',newLoop:false,startMuted:false,tone:true,toneHz:1000,awake:false,pipAuto:true,seenLog:'',adFreeUntil:0,dayProg:0,weekProg:0,monthProg:0,stream:{},fonts:[]};
+let S={channels:[],accent:'black',theme:'default',h12:false,newOff:'black',newLoop:false,startMuted:false,tone:true,toneHz:1000,awake:false,pipAuto:true,seenLog:'',adFreeUntil:0,dayProg:0,weekProg:0,monthProg:0,stream:{},fonts:[],ntsc:'off',ntscPitch:'keep'};
 try{const raw=localStorage.getItem('tvstudio:v1');if(raw)S=Object.assign(S,JSON.parse(raw)||{});}catch(e){}
 if(!Array.isArray(S.channels))S.channels=[];
 if(!Array.isArray(S.fonts))S.fonts=[];
@@ -1526,7 +1527,7 @@ $('#fv').addEventListener('change',async e=>{
   for(const f of files){
     try{
       const dur=await readDuration(f); const fid=uid(); await putFile(fid,f);
-      entries.push({fileId:fid,name:nameOf(f),duration:dur,timed:true,start:0,daily:false,manual:false});
+      const en={fileId:fid,name:nameOf(f),duration:dur,timed:true,start:0,daily:false,manual:false};await ntscTag(en,URL.createObjectURL(f),true);entries.push(en);
     }catch(err){fail++;lastErr=(err&&err.message)||String(err);}
   }
   hideBusy(); finishImport(ch,entries,fail,lastErr);
@@ -1569,7 +1570,7 @@ window.tvNative={
         if(!a.id||a.error){fail++;lastErr=a.error||'copy failed';continue;}
         let dur=a.duration;
         if(!(dur>0)){try{dur=await readDurationUrl(nativeUrl(a.id),false);}catch(e){fail++;lastErr=(e&&e.message)||'unreadable';try{window.TVAndroid.deleteMedia(a.id);}catch(_){}continue;}}
-        entries.push({fileId:a.id,name:nameStr(a.name),duration:dur,timed:true,start:0,daily:false,manual:false});
+        const en={fileId:a.id,name:nameStr(a.name),duration:dur,timed:true,start:0,daily:false,manual:false};await ntscTag(en,nativeUrl(a.id),false);entries.push(en);
       }
       finishImport(ch,entries,fail,lastErr);
     })();
@@ -1768,7 +1769,7 @@ function pipButton(){const b=$('#pipBtn');if(b)b.hidden=!pipOK();}
 pipButton();
 
 /* ---------- update log ---------- */
-const APP_VERSION='1.8';
+const APP_VERSION='1.9';
 const UPDATES=[
   {v:'1.8',date:'17.10.2026',items:[
     'Control menu redesigned to fit on a phone: the picture sits on the left and every section is shown at once as small cards (like OBS). Tap Tabs to switch to one section at a time',
@@ -1980,7 +1981,8 @@ function renderSettings(){
     ${setRow('Keep screen on while watching','Stops your phone from going to sleep during a channel','awake',[['on','On'],['off','Off']],S.awake?'on':'off')}
   </div>
   ${adsGroup()}
-  <div class="setgroup"><h3>Export</h3>
+  ${vaGroup()}<div class="setgroup"><h3>Export</h3>
+    ${xRows()}
     <div class="set-row"><div style="min-width:0"><div class="rtitle">TV guide for other apps (XMLTV)</div><div class="rsub">The next 7 days of every channel, in the standard format guide apps read</div></div><button class="btn soft sm" data-act="export-xml">Export</button></div>
     <div class="set-row"><div style="min-width:0"><div class="rtitle">Printable schedule (text)</div><div class="rsub">A simple list of what airs on each channel for the next 7 days</div></div><button class="btn soft sm" data-act="export-txt">Export</button></div>
   </div>
@@ -2599,9 +2601,10 @@ function tickLive(){
 }
 /* record the channel to a video file (Android app only) */
 function recToggle(){
+  if(WR){webRecStop();return;}
   if(STR.rec&&(STR.live||stBusy())){stopStream();return;}
   if(STR.live||stBusy()){toast('Stop the stream first');return;}
-  if(!(window.TVAndroid&&typeof window.TVAndroid.startRecord==='function')){toast('Recording only works in the Android app');return;}
+  if(!(window.TVAndroid&&typeof window.TVAndroid.startRecord==='function')){webRec();return;}
   if(OFFLINE){toast('You need internet to record');return;}
   const ch=P.ch; if(!ch){toast('Open a channel first');return;}
   STR.rec=true;STR.chId=ch.id;STR.err='';STR.state='starting';STR.t=Date.now();applyVol();syncLive();
@@ -2750,6 +2753,160 @@ function exportGuide(kind){
 /* ---------- player ---------- */
 const P={ch:null,token:0,key:null,mode:'',muted:RENDER?false:!!S.startMuted,under:null};
 const vid=$('#vid'),vcan=$('#vcan'),vctx=vcan.getContext('2d');
+/* ===== v1.9 additions: NTSC>PAL speed-up, audio/sub tracks, backup, M3U8, TS recording ===== */
+let XA=null,SUBT=null,WR=null;
+const xa=()=>XA||(XA=Object.assign(document.createElement('audio'),{preload:'auto'}));
+const xaOn=()=>!!(P.cur&&typeof P.cur.aud==='string'&&P.cur.aud[0]==='x');
+const ntscRate=it=>{const m=S.ntsc;return (m==='all'||(m==='auto'&&it&&it.ntsc))?1.04:1;};
+function setPitch(el,keep){['preservesPitch','webkitPreservesPitch','mozPreservesPitch'].forEach(k=>{try{el[k]=keep;}catch(e){}});}
+function rateApply(it){const r=ntscRate(it),k=S.ntscPitch!=='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,k);});}
+function detectFps(u){return new Promise(res=>{const v=document.createElement('video');if(!v.requestVideoFrameCallback)return res(0);v.muted=true;v.playsInline=true;const m=[],end=r=>{clearTimeout(t);try{v.pause();v.removeAttribute('src');v.load();}catch(e){}res(r);},t=setTimeout(()=>end(0),7000);
+  const cb=(n,md)=>{m.push(md.mediaTime);if(m.length>=8){const d=(m[m.length-1]-m[0])/(m.length-1);return end(d>0?1/d:0);}v.requestVideoFrameCallback(cb);};
+  v.onloadeddata=()=>{v.requestVideoFrameCallback(cb);v.play().catch(()=>end(0));};v.onerror=()=>end(0);v.src=u;});}
+async function ntscTag(en,u,revoke){en.srcDur=en.duration;if(S.ntsc!=='off'){const f=await detectFps(u);en.ntsc=f>23.5&&f<24.5;en.duration=en.srcDur/ntscRate(en);}if(revoke)try{URL.revokeObjectURL(u);}catch(e){}}
+const allItems=()=>S.channels.flatMap(c=>c.items.concat((c.scenes||[]).flatMap(x=>(x.data&&x.data.items)||[])));
+function applyNtsc(){allItems().forEach(it=>{it.srcDur=it.srcDur||it.duration;it.duration=it.srcDur/ntscRate(it);});save();if(P.cur)rateApply(P.cur);if(S.ntsc==='auto')detectAll();}
+async function detectAll(){for(const it of allItems()){if(it.ntsc!==undefined)continue;const u=await getURL(it.fileId);if(!u)continue;it.ntsc=(f=>f>23.5&&f<24.5)(await detectFps(u));it.srcDur=it.srcDur||it.duration;}applyNtsc2();}
+function applyNtsc2(){allItems().forEach(it=>{it.srcDur=it.srcDur||it.duration;it.duration=it.srcDur/ntscRate(it);});save();}
+/* tracks */
+async function applyTracks(it){
+  const ch=P.ch||{},pf=ch.trkPref||{},at=vid.audioTracks;let a=it.aud;
+  if(a===undefined&&at&&at.length){let k=-1;for(let i=0;i<at.length;i++)if(pf.lang&&at[i].language===pf.lang){k=i;break;}if(k<0&&pf.idx!==undefined&&pf.idx<at.length)k=pf.idx;if(k>=0)a='e:'+k;}
+  if(at&&at.length&&a&&a[0]==='e'){const k=+a.slice(2);for(let i=0;i<at.length;i++)at[i].enabled=i===k;}
+  const x=a&&a[0]==='x'?(it.xa||[])[+a.slice(2)]:null,e=xa();
+  if(x){if(e._f!==x.fileId){e.src=await getURL(x.fileId);e._f=x.fileId;}}else{e.pause();e.removeAttribute('src');e._f=null;}
+  rateApply(it);applyVol();
+  SUBT=null;[...vid.querySelectorAll('track')].forEach(t=>t.remove());
+  for(const s of it.xs||[]){const b=await getFile(s.fileId);if(!b)continue;let tx=await b.text();if(!/^\uFEFF?WEBVTT/.test(tx))tx='WEBVTT\n\n'+tx.replace(/\r/g,'').replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g,'$1.$2');const tr=document.createElement('track');tr.kind='subtitles';tr.label=s.name;tr.src=URL.createObjectURL(new Blob([tx],{type:'text/vtt'}));vid.appendChild(tr);tr.track.mode='hidden';}
+  const ts=[...vid.textTracks];let s=it.sub;if(s===undefined&&pf.slang)s=ts.findIndex(t=>t.language===pf.slang);
+  ts.forEach(t=>{if(t.mode!=='disabled')t.mode='disabled';});if(s>=0&&ts[s]){ts[s].mode='hidden';SUBT=ts[s];}
+}
+function subDraw(){const c=SUBT&&SUBT.activeCues;if(!c||!c.length)return;const cw=vcan.width,H=vcan.height,fs=Math.round(H*0.055),L=[];vctx.font='700 '+fs+'px Inter,sans-serif';vctx.textAlign='center';vctx.textBaseline='bottom';vctx.lineWidth=fs/6;vctx.lineJoin='round';vctx.strokeStyle='#000';vctx.fillStyle='#fff';[...c].forEach(q=>L.push(...String(q.text).replace(/<[^>]+>/g,'').split('\n')));let y=H-fs*0.8;for(let i=L.length-1;i>=0;i--){vctx.strokeText(L[i],cw/2,y);vctx.fillText(L[i],cw/2,y);y-=fs*1.2;}}
+function xaSync(){const e=XA;if(!e||!e._f)return;if(!xaOn()||vid.paused||P.mode!=='video'){if(!e.paused)e.pause();return;}if(Math.abs(e.currentTime-vid.currentTime)>0.35){try{e.currentTime=vid.currentTime;}catch(_){}}if(e.paused)e.play().catch(()=>{});}
+vid.addEventListener('timeupdate',xaSync);vid.addEventListener('pause',xaSync);vid.addEventListener('seeked',xaSync);
+function pickFiles(accept,multi){return new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept=accept;i.multiple=!!multi;i.onchange=()=>res([...i.files]);i.click();});}
+function openTracks(){
+  const it=P.cur,ch=P.ch;if(!it||!ch){toast('Play a video first');return;}
+  let o=$('#trkDlg');if(!o){o=document.createElement('div');o.id='trkDlg';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);display:grid;place-items:center';document.body.appendChild(o);o.addEventListener('click',trkClick);}
+  const at=vid.audioTracks,ts=[...vid.textTracks],lab=(t,i)=>esc(t.label||t.language||'Track '+(i+1))+(t.language&&t.label?' ('+esc(t.language)+')':'');
+  const b=(a,v,txt,on)=>`<button class="btn sm${on?'':' soft'}" data-t="${a}" data-v="${v}" style="margin:3px">${txt}</button>`;
+  const ea=at&&at.length?[...at].findIndex(t=>t.enabled):-1,ca=it.aud||(ea>=0?'e:'+ea:'');
+  const cs=it.sub===undefined?ts.findIndex(t=>t.mode!=='disabled'):it.sub;
+  let h=`<div style="background:#1c1c1e;color:#fff;max-width:560px;width:92%;max-height:88vh;overflow:auto;padding:16px;border-radius:16px;font:14px Inter,sans-serif"><b>Audio &amp; subtitles</b><div style="opacity:.7;margin-bottom:8px">${esc(it.name)}</div><b>Audio</b><br>`;
+  if(at&&at.length)for(let i=0;i<at.length;i++)h+=b('a','e:'+i,lab(at[i],i),ca==='e:'+i);else h+='<div style="opacity:.7">This browser can\u2019t list the audio tracks inside a video file. You can still add your own below.</div>';
+  (it.xa||[]).forEach((x,i)=>{h+=b('a','x:'+i,'+ '+esc(x.name),ca==='x:'+i);});
+  h+=b('addA','','Add audio (MP3 or video)…',0)+'<br><b>Subtitles</b><br>'+b('s','-1','Off',cs<0);
+  ts.forEach((t,i)=>{h+=b('s',i,lab(t,i),cs===i);});
+  h+=b('addS','','Add subtitles (.srt / .vtt)…',0)+'<br><br>'+b('chan','','Use these choices for the whole channel',0)+b('x','','Close',0)+'</div>';
+  o.innerHTML=h;o.style.display='grid';
+}
+async function trkClick(e){
+  const el=e.target.closest('[data-t]'),o=$('#trkDlg');if(e.target===o){o.style.display='none';return;}if(!el)return;
+  const it=P.cur,k=el.dataset.t,v=el.dataset.v;if(!it)return;
+  if(k==='x'){o.style.display='none';return;}
+  if(k==='a')it.aud=v;
+  else if(k==='s')it.sub=+v;
+  else if(k==='addA'||k==='addS'){const fs=await pickFiles(k==='addA'?'audio/*,video/*,.mp3,.m4a,.aac,.ac3,.mka':'.srt,.vtt',false);if(!fs.length)return;const f=fs[0],fid=uid();await putFile(fid,f);const r={fileId:fid,name:nameStr(f.name)};
+    if(k==='addA'){it.xa=(it.xa||[]).concat(r);it.aud='x:'+(it.xa.length-1);}else{it.xs=(it.xs||[]).concat(r);await applyTracks(it);it.sub=[...vid.textTracks].length-1;}}
+  else if(k==='chan'){const at=vid.audioTracks,ts=[...vid.textTracks],pf={};const a=it.aud&&it.aud[0]==='e'?+it.aud.slice(2):-1;if(a>=0&&at&&at[a]){pf.idx=a;if(at[a].language)pf.lang=at[a].language;}if(it.sub>=0&&ts[it.sub]&&ts[it.sub].language)pf.slang=ts[it.sub].language;P.ch.trkPref=pf;
+    P.ch.items.forEach(x=>{delete x.aud;delete x.sub;});save();toast('Saved for this channel');}
+  save();await applyTracks(it);if(k!=='chan')openTracks();
+}
+/* backup */
+async function backup(media){
+  const cfg=JSON.parse(JSON.stringify(S));cfg.stream.key='';cfg.stream.remember=false;
+  if(!media){exportFile('tvstudio-backup.json','application/json',JSON.stringify({tvstudio:1,S:cfg}));return;}
+  showBusy('Building backup…');const ids=new Set();JSON.stringify(cfg,(k,v)=>{if(k==='fileId'&&v)ids.add(v);return v;});
+  const parts=[],files=[];
+  for(const id of ids){try{const bl=isNat(id)?await (await fetch(nativeUrl(id))).blob():await getFile(id);if(bl){files.push({id,size:bl.size,type:bl.type});parts.push(bl);}}catch(e){}}
+  const h=new TextEncoder().encode(JSON.stringify({tvstudio:1,S:cfg,files})),n=new Uint8Array(4);new DataView(n.buffer).setUint32(0,h.length);
+  saveBlob(new Blob(['TVSB',n,h,...parts],{type:'application/octet-stream'}),'tvstudio-backup-'+dateStr(Date.now())+'.tvsb');hideBusy();
+}
+function saveBlob(b,name){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href);},4000);}
+async function restore(){
+  const f=(await pickFiles('.json,.tvsb,application/json',false))[0];if(!f)return;
+  try{showBusy('Restoring…');let D,miss=true;const head=new Uint8Array(await f.slice(0,8).arrayBuffer());
+    if(String.fromCharCode(...head.slice(0,4))==='TVSB'){const n=new DataView(head.buffer).getUint32(4),h=JSON.parse(await f.slice(8,8+n).text());let p=8+n,txt=JSON.stringify(h.S);
+      for(const x of h.files){const nid=uid();await putFile(nid,f.slice(p,p+x.size,x.type));p+=x.size;txt=txt.split('"'+x.id+'"').join('"'+nid+'"');}D=JSON.parse(txt);miss=false;}
+    else D=JSON.parse(await f.text()).S;
+    D.channels.forEach(c=>{c.id=uid();});S.channels.push(...D.channels);(D.fonts||[]).forEach(x=>{if(!S.fonts.some(g=>g.fileId===x.fileId))S.fonts.push(x);});
+    save();hideBusy();renderSettings();toast(`Restored ${D.channels.length} channel${D.channels.length===1?'':'s'}`+(miss?'. This backup has no videos: add them again':''),5000);
+  }catch(e){hideBusy();toast('Couldn\u2019t read that backup',4000);}
+}
+function exportM3u(id){const ch=getCh(id);if(!ch)return;const l=weekAirings(ch,Date.now()),src=l.length?l.map(o=>o.it):ch.items;
+  let t='#EXTM3U\n#PLAYLIST:'+ch.name+'\n';src.forEach(it=>{t+=`#EXTINF:${Math.round(it.duration)},${it.name}\n${mediaBase?mediaBase+it.fileId:(it.orig||it.name)}\n`;});
+  exportFile(String(ch.name).replace(/[^\w\- ]+/g,'_')+'.m3u8','application/vnd.apple.mpegurl',t);}
+function vaGroup(){return `<div class="setgroup"><h3>Video &amp; audio</h3>
+  ${setRow('NTSC to PAL speed-up','Plays NTSC film (24 fps) videos 4% faster, like PAL TV, so they air 4% shorter. \u201cAll videos\u201d speeds up everything.','ntsc',[['off','Off'],['auto','24 fps videos'],['all','All videos']],S.ntsc||'off')}
+  ${setRow('Pitch when sped up','Keep the original NTSC pitch, or let the sound rise to PAL pitch','ntscPitch',[['keep','Keep NTSC pitch'],['pal','PAL pitch']],S.ntscPitch||'keep')}
+  <div class="set-row"><div class="rsub" style="margin:0">While a channel plays, tap <b>Tracks</b> to pick the audio and subtitles, or add your own audio and subtitle files.</div></div></div>`;}
+function xRows(){return `<div class="set-row"><div style="min-width:0"><div class="rtitle">Backup channels</div><div class="rsub">Settings only (small), or with every video (big file)</div></div><div class="set-btns"><button class="btn soft sm" data-act="bk-cfg">Settings</button><button class="btn soft sm" data-act="bk-all">With videos</button></div></div>
+  <div class="set-row"><div style="min-width:0"><div class="rtitle">Restore a backup</div><div class="rsub">Adds the channels from a backup file</div></div><button class="btn soft sm" data-act="bk-restore">Restore</button></div>
+  ${S.channels.length?`<div class="set-row"><div style="min-width:0"><div class="rtitle">Channel playlist (M3U8)</div><div class="rsub">A playlist of what airs on a channel, for VLC and other players</div></div><div class="set-btns">${S.channels.map(c=>`<button class="btn soft sm" data-act="m3u" data-id="${c.id}">${esc(c.name)}</button>`).join('')}</div></div>`:''}`;}
+/* record to .ts: MediaRecorder (MP4/H.264) remuxed to MPEG-TS */
+function tsMux(){
+  const blobs=[];let cur=[],buf=new Uint8Array(0),trk={},cc={};const T0=90000;
+  const u32=(b,o)=>(b[o]<<24|b[o+1]<<16|b[o+2]<<8|b[o+3])>>>0,typ=(b,o)=>String.fromCharCode(b[o],b[o+1],b[o+2],b[o+3]);
+  const kids=(b,s,e)=>{const r=[];while(s+8<=e){const z=u32(b,s);if(z<8)break;r.push([typ(b,s+4),s+8,Math.min(s+z,e)]);s+=z;}return r;};
+  const find=(b,s,e,t)=>kids(b,s,e).find(k=>k[0]===t);
+  const idx=(r,s)=>{for(let i=0;i+4<=r.length;i++)if(typ(r,i)===s)return i;return -1;};
+  const cat=a=>{const o=new Uint8Array(a.reduce((n,x)=>n+x.length,0));let p=0;a.forEach(x=>{o.set(x,p);p+=x.length;});return o;};
+  const crcT=[];for(let i=0;i<256;i++){let c=i<<24;for(let j=0;j<8;j++)c=c&0x80000000?(c<<1)^0x04C11DB7:c<<1;crcT[i]=c>>>0;}
+  const crc=b=>{let c=0xFFFFFFFF;for(const x of b)c=((c<<8)^crcT[((c>>>24)^x)&255])>>>0;return c;};
+  const put=p=>{cur.push(p);if(cur.length>=4000){blobs.push(new Blob(cur));cur=[];}};
+  const nextCC=pid=>cc[pid]=((cc[pid]===undefined?-1:cc[pid])+1)&15;
+  const psi=(pid,t)=>{const c=crc(t),p=new Uint8Array(188).fill(0xFF);p[0]=0x47;p[1]=0x40|pid>>8;p[2]=pid&255;p[3]=0x10|nextCC(pid);p.set([0,...t,c>>>24,(c>>>16)&255,(c>>>8)&255,c&255],4);put(p);};
+  const tables=()=>{psi(0,[0,0xB0,13,0,1,0xC1,0,0,0,1,0xF0,0]);psi(0x1000,[2,0xB0,23,0,1,0xC1,0,0,0xE1,0,0xF0,0,0x1B,0xE1,0,0xF0,0,0x0F,0xE1,1,0xF0,0]);};
+  const pkt=(pid,d,pcr,rai)=>{let off=0,first=true;while(off<d.length){const left=d.length-off,p=new Uint8Array(188).fill(0xFF),pc=first&&pcr!=null;p[0]=0x47;p[1]=(first?0x40:0)|pid>>8;p[2]=pid&255;
+    let af=pc?8:0;const n=Math.min(left,184-af);if(n<184-af)af=184-n;p[3]=(af?0x30:0x10)|nextCC(pid);
+    if(af){p[4]=af-1;if(af>1){p[5]=(pc?0x10:0)|(rai&&first?0x40:0);if(pc){const b=pcr;p[6]=Math.floor(b/2**25)&255;p[7]=(b>>>17)&255;p[8]=(b>>>9)&255;p[9]=(b>>>1)&255;p[10]=((b&1)<<7)|0x7E;p[11]=0;}}}
+    p.set(d.subarray(off,off+n),4+af);off+=n;first=false;put(p);}};
+  const enc=(v,m)=>[(m<<4)|((Math.floor(v/2**30)&7)<<1)|1,(v>>>22)&255,(((v>>>15)&127)<<1)|1,(v>>>7)&255,((v&127)<<1)|1];
+  const pes=(pid,sid,d,pts,dts,key)=>{const both=pts!==dts,h=[0,0,1,sid,0,0,0x80,both?0xC0:0x80,both?10:5,...enc(pts,both?3:2),...(both?enc(dts,1):[])];
+    if(sid===0xC0){const n=h.length-6+d.length;h[4]=n>>8;h[5]=n&255;}if(key)tables();pkt(pid,cat([Uint8Array.from(h),d]),pid===0x100?Math.max(0,dts-9000):null,key);};
+  const sc90=(v,t)=>Math.round(v*90000/t)+T0,SC=new Uint8Array([0,0,0,1]);
+  const sample=(t,d,dts,pts,key)=>{const D=sc90(dts,t.sc),Pp=sc90(pts,t.sc);
+    if(t.h==='vide'){const parts=[new Uint8Array([0,0,0,1,9,0xF0])];if(key)t.ps.forEach(p=>parts.push(SC,p));
+      for(let o=0;o+t.nl<=d.length;){let l=0;for(let i=0;i<t.nl;i++)l=l*256+d[o+i];o+=t.nl;parts.push(SC,d.subarray(o,o+l));o+=l;}pes(0x100,0xE0,cat(parts),Pp,D,key);}
+    else{const L=d.length+7,h=new Uint8Array([0xFF,0xF1,((t.ot-1)<<6)|(t.fi<<2)|(t.ch>>2),((t.ch&3)<<6)|(L>>11),(L>>3)&255,((L&7)<<5)|0x1F,0xFC]);pes(0x101,0xC0,cat([h,d]),Pp,Pp,false);}};
+  const moov=(b,s,e)=>kids(b,s,e).filter(k=>k[0]==='trak').forEach(([,ts,te])=>{
+    const tk=find(b,ts,te,'tkhd'),id=u32(b,tk[1]+(b[tk[1]]?20:12)),md=find(b,ts,te,'mdia'),mh=find(b,md[1],md[2],'mdhd'),sc=u32(b,mh[1]+(b[mh[1]]?20:12));
+    const hd=find(b,md[1],md[2],'hdlr'),h=typ(b,hd[1]+8),mi=find(b,md[1],md[2],'minf'),sb=find(b,mi[1],mi[2],'stbl'),sd=find(b,sb[1],sb[2],'stsd'),raw=b.subarray(sd[1],sd[2]),t={id,sc,h};
+    if(h==='vide'){const a=raw.subarray(idx(raw,'avcC')+4);t.nl=(a[4]&3)+1;let o=6;t.ps=[];for(let n=a[5]&31;n--;){const l=a[o]<<8|a[o+1];t.ps.push(a.slice(o+2,o+2+l));o+=2+l;}for(let n=a[o++];n--;){const l=a[o]<<8|a[o+1];t.ps.push(a.slice(o+2,o+2+l));o+=2+l;}}
+    else if(h==='soun'){const a=raw.subarray(idx(raw,'esds')+4);let o=4;const rd=()=>{o++;let l=0,c;do{c=a[o++];l=l<<7|c&127;}while(c&128);return l;};rd();o+=3;rd();o+=13;rd();const c0=a[o],c1=a[o+1];t.ot=c0>>3;t.fi=(c0&7)<<1|c1>>7;t.ch=(c1>>3)&15;}
+    else return;trk[id]=t;});
+  const frag=seg=>{const mz=u32(seg,0);kids(seg,8,mz).filter(k=>k[0]==='traf').forEach(([,s,e])=>{
+    const k=kids(seg,s,e),th=k.find(x=>x[0]==='tfhd'),td=k.find(x=>x[0]==='tfdt'),tf=u32(seg,th[1])&0xFFFFFF,t=trk[u32(seg,th[1]+4)];if(!t)return;
+    let o=th[1]+8;if(tf&1)o+=8;if(tf&2)o+=4;const dd=tf&8?u32(seg,o):0;if(tf&8)o+=4;const ds=tf&16?u32(seg,o):0;if(tf&16)o+=4;const df=tf&32?u32(seg,o):0;
+    let dts=td?(seg[td[1]]?u32(seg,td[1]+4)*4294967296+u32(seg,td[1]+8):u32(seg,td[1]+4)):0;
+    k.filter(x=>x[0]==='trun').forEach(([,rs])=>{const f=u32(seg,rs)&0xFFFFFF,ver=seg[rs],n=u32(seg,rs+4);let p=rs+8,pos=0,ff=null;if(f&1){pos=u32(seg,p)|0;p+=4;}if(f&4){ff=u32(seg,p);p+=4;}
+      for(let i=0;i<n;i++){let du=dd,sz=ds,fl=i===0&&ff!==null?ff:df,co=0;if(f&256){du=u32(seg,p);p+=4;}if(f&512){sz=u32(seg,p);p+=4;}if(f&1024){fl=u32(seg,p);p+=4;}if(f&2048){co=ver?u32(seg,p)|0:u32(seg,p);p+=4;}
+        sample(t,seg.subarray(pos,pos+sz),dts,dts+co,!(fl&0x10000));pos+=sz;dts+=du;}});});};
+  return{
+    push(c){buf=cat([buf,c]);let used=0;
+      for(;;){const b=buf,s=used;if(b.length-s<8)break;const z=u32(b,s),ty=typ(b,s+4);if(z<8)break;if(b.length-s<z)break;
+        if(ty==='moov')moov(b,s+8,s+z);
+        else if(ty==='moof'){if(b.length-s<z+8)break;const z2=u32(b,s+z);if(b.length-s<z+z2)break;frag(b.subarray(s,s+z+z2));used=s+z+z2;continue;}
+        used=s+z;}
+      buf=buf.slice(used);},
+    end(){tables();if(cur.length)blobs.push(new Blob(cur));return new Blob(blobs,{type:'video/mp2t'});}};
+}
+async function webRec(){
+  const ch=P.ch;if(!ch){toast('Open a channel first');return;}
+  const mt=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc1,mp4a','video/mp4'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m));
+  if(!mt){toast('This browser can\u2019t record H.264. Use a recent Chrome, Edge or Safari to record .ts files.',5000);return;}
+  try{
+    AC=AC||new (window.AudioContext||window.webkitAudioContext)();await AC.resume();xa();
+    const dest=AC.createMediaStreamDestination();[vid,XA].forEach(el=>{if(!el._s){el._s=AC.createMediaElementSource(el);el._s.connect(AC.destination);}el._s.connect(dest);});
+    const st=new MediaStream([...vcan.captureStream(30).getVideoTracks(),...dest.stream.getAudioTracks()]),mr=new MediaRecorder(st,{mimeType:mt,videoBitsPerSecond:5e6,audioBitsPerSecond:160e3}),mx=tsMux();
+    WR={mr,dest,q:Promise.resolve(),name:ch.name};
+    mr.ondataavailable=e=>{if(e.data&&e.data.size)WR.q=WR.q.then(async()=>mx.push(new Uint8Array(await e.data.arrayBuffer())));};
+    mr.onstop=async()=>{const w=WR;await w.q;[vid,XA].forEach(el=>{try{el._s.disconnect(w.dest);}catch(e){}});saveBlob(mx.end(),String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-')+'.ts');WR=null;const b=$('#recBtn');if(b)b.textContent='Record';toast('Recording saved as .ts');};
+    mr.start(1000);const b=$('#recBtn');if(b)b.textContent='Stop rec';toast('Recording .ts. It records what you hear and the picture, so keep sound on. Tap Record again to stop.',5000);
+  }catch(e){WR=null;toast('Couldn\u2019t start recording',4000);}
+}
+function webRecStop(){try{WR.mr.stop();}catch(e){WR=null;}}
+
 function syncMuteBtn(){$('#muteBtn').textContent=P.muted?'Sound off':'Sound on';}
 syncMuteBtn();
 let WL=null;
@@ -2765,7 +2922,7 @@ const chMuted=()=>!!(P.ch&&P.ch.muted);
 /* while live, the sound goes out through the hidden stream player, so this screen stays silent (no echo, no double sound) */
 const localQuiet=()=>!RENDER&&(STR.live||CAST.on||STR.state==='starting'||STR.state==='connecting');
 function applyVol(){
-  try{vid.muted=(!RENDER&&P.muted)||localQuiet()||chMuted();vid.volume=chVol();}catch(e){}
+  try{const q=(!RENDER&&P.muted)||localQuiet()||chMuted();vid.muted=q||xaOn();vid.volume=chVol();if(XA){XA.muted=q;XA.volume=chVol();}}catch(e){}
   if(gainN){try{gainN.gain.value=0.06*chVol();}catch(e){}}
   tone(P.mode==='bars');
 }
@@ -2821,6 +2978,7 @@ function drawLoop(){
     if(fit==='stretch')vctx.drawImage(vid,0,0,cw,chh);
     else{const k=fit==='fill'?Math.max(cw/vw,chh/vh):Math.min(cw/vw,chh/vh),w=vw*k,h=vh*k;vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);}
   }catch(e){}
+  subDraw();
 }
 function stopVideo(){vid.onplaying=null;vid.onended=null;vid.onloadedmetadata=null;vid.onerror=null;vid.pause();vid.removeAttribute('src');vid.load();}
 const fitPlayer=()=>fitPic($('#pic'),$('#pwrap'),ratioOf(P.ch));
@@ -2881,7 +3039,7 @@ function markBad(it,bad,err){
   if(bad)toast(`Can\u2019t play \u201c${it.name}\u201d (${e}). ${/format/.test(e)?'Try a standard MP4 (H.264).':''}`,5000);
 }
 async function loadItem(info,t){
-  const it=info.item; setMode('loading');
+  const it=info.item; P.cur=it; setMode('loading');
   let url=await getURL(it.fileId);
   if(t!==P.token)return;
   if(!url){markBad(it,true,'file is missing');setMode('bars');return;}
@@ -2890,8 +3048,9 @@ async function loadItem(info,t){
   arm();
   vid.onloadedmetadata=()=>{
     if(t!==P.token)return; clearTimeout(wd); markBad(it,false);
-    const off=(Date.now()-info.start)/1000;
+    const off=(Date.now()-info.start)/1000*ntscRate(it);
     const d=vid.duration||off+1;
+    rateApply(it);applyTracks(it);if(it.ntsc===undefined&&S.ntsc!=='off')detectFps(url).then(f=>{it.ntsc=f>23.5&&f<24.5;it.srcDur=it.srcDur||it.duration;applyNtsc();});
     try{vid.currentTime=Math.min(off,Math.max(0,d-0.3));}catch(e){}
     setMode('video'); applyVol(); if(!(P.ch&&P.ch.pausedAt)&&!OFFLINE)vid.play().catch(()=>{});
   };
@@ -2940,7 +3099,7 @@ async function syncPlayer(){
   $('#pl2').textContent=info.next?`Up next at ${clockT(info.nextStart)}: ${info.next.name}`:'Last one scheduled';
   if(key!==P.key){P.key=key;const t=++P.token;await loadItem(info,t);return;}
   if(P.mode==='video'&&vid.readyState>0&&!vid.ended){
-    if(!vid.seeking&&Math.abs(vid.currentTime-info.offset)>3){try{vid.currentTime=info.offset;}catch(e){}}
+    if(!vid.seeking&&Math.abs(vid.currentTime-info.offset*ntscRate(info.item))>3){try{vid.currentTime=info.offset*ntscRate(info.item);}catch(e){}}
     if(vid.paused)vid.play().catch(()=>{});
   }
 }
@@ -3538,6 +3697,8 @@ document.addEventListener('click',e=>{
       else if(k==='tone')S.tone=v==='on';
       else if(k==='awake')S.awake=v==='on';
       else if(k==='pip'){S.pipAuto=v==='on';}
+      else if(k==='ntsc'){S.ntsc=v;applyNtsc();}
+      else if(k==='ntscPitch'){S.ntscPitch=v;applyNtsc();}
       save(); renderSettings(); pipSync(); break;
     }
     case 'wipe':wipe();break;
@@ -3571,6 +3732,11 @@ document.addEventListener('click',e=>{
     case 'card-down':moveChannel(id,1);break;
     case 'dup':dupChannel(id);break;
     case 'export-xml':exportGuide('xml');break;
+    case 'trk':openTracks();break;
+    case 'bk-cfg':backup(false);break;
+    case 'bk-all':backup(true);break;
+    case 'bk-restore':restore();break;
+    case 'm3u':exportM3u(id);break;
     case 'export-txt':exportGuide('txt');break;
     case 'prog-next':skipNext();break;
     case 'prog-prev':skipPrev();break;
