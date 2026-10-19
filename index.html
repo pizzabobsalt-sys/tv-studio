@@ -971,7 +971,8 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
         <button class="btn soft sm" data-act="pic-fit" data-v="fit">Fit</button>
         <button class="btn soft sm" data-act="pic-fit" data-v="fill">Fill</button>
         <button class="btn soft sm" data-act="pic-fit" data-v="stretch">Stretch</button>
-        <button class="btn soft sm" data-act="pic-fit" data-v="149" id="pFit149" hidden>14:9 zoom</button>
+        <button class="btn soft sm" data-act="pic-fit" data-v="149-43" id="pFit149a" hidden>16:9 → 14:9 zoom (4:3 only)</button>
+        <button class="btn soft sm" data-act="pic-fit" data-v="149-169" id="pFit149b" hidden>4:3 → 14:9 zoom (16:9 only)</button>
       </div>
       <button class="btn danger" data-act="pic-reset">Reset to default</button>
     </aside>
@@ -2693,12 +2694,12 @@ const xa=()=>XA||(XA=Object.assign(document.createElement('audio'),{preload:'aut
 const xaOn=()=>!!(P.cur&&typeof P.cur.aud==='string'&&P.cur.aud[0]==='x');
 const ntscRate=it=>{const m=S.ntsc;return (m==='all'||(m==='auto'&&it&&it.ntsc))?1.04:1;};
 function setPitch(el,keep){['preservesPitch','webkitPreservesPitch','mozPreservesPitch'].forEach(k=>{try{el[k]=keep;}catch(e){}});}
-function mkShift(ctx,r){const W=0.1,T=W/(r-1),n=Math.round(T*ctx.sampleRate),inp=ctx.createGain(),out=ctx.createGain(),dB=ctx.createBuffer(1,n,ctx.sampleRate),gB=ctx.createBuffer(1,n,ctx.sampleRate),d=dB.getChannelData(0),g=gB.getChannelData(0);
-  for(let i=0;i<n;i++){const ph=i/n;d[i]=W*(1-ph);g[i]=1-Math.abs(2*ph-1);}
-  [0,0.5].forEach(o=>{const dl=ctx.createDelay(1),gn=ctx.createGain(),s1=ctx.createBufferSource(),s2=ctx.createBufferSource();dl.delayTime.value=0;gn.gain.value=0;s1.buffer=dB;s2.buffer=gB;s1.loop=s2.loop=true;s1.connect(dl.delayTime);s2.connect(gn.gain);inp.connect(dl);dl.connect(gn);gn.connect(out);s1.start(0,o*T);s2.start(0,o*T);});
+/* Small dual-delay pitch shifter for the recording feed. r is the desired pitch ratio. */
+function mkShift(ctx,r){const W=0.1,T=W/Math.abs(r-1),n=Math.max(2,Math.round(T*ctx.sampleRate)),inp=ctx.createGain(),out=ctx.createGain(),dB=ctx.createBuffer(1,n,ctx.sampleRate),gB=ctx.createBuffer(1,n,ctx.sampleRate),d=dB.getChannelData(0),g=gB.getChannelData(0);
+  for(let i=0;i<n;i++){const ph=i/n;d[i]=W*(r<1?ph:1-ph);g[i]=1-Math.abs(2*ph-1);}
+  [0,0.5].forEach(o=>{const dl=ctx.createDelay(1),gn=ctx.createGain(),s1=ctx.createBufferSource(),s2=ctx.createBufferSource();dl.delayTime.value=0;gn.gain.value=0;s1.buffer=dB;s2.buffer=gB;s1.loop=s2.loop=true; s1.connect(dl.delayTime);s2.connect(gn.gain);inp.connect(dl);dl.connect(gn);gn.connect(out);s1.start(0,o*T);s2.start(0,o*T);});
   return{inp,out};}
-/* once an element is routed through Web Audio (recording), the browser's own pitch switch can't be trusted there, so the element always keeps NTSC pitch and PAL pitch is made by the shifter above */
-function rateApply(it){const r=ntscRate(it),pal=r!==1&&((it&&it.pitch)||S.ntscPitch)==='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,el._s?true:!pal);if(el._d){el._d.gain.value=pal?0:1;el._p.gain.value=pal?1:0;}});}
+function rateApply(it){const r=ntscRate(it),pal=r!==1&&((it&&it.pitch)||S.ntscPitch)==='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,!pal);if(el._d)el._d.gain.value=1;if(el._p)el._p.gain.value=0;});}
 function detectFps(u){return new Promise(res=>{const v=document.createElement('video');if(!v.requestVideoFrameCallback)return res(0);v.muted=true;v.playsInline=true;const m=[],end=r=>{clearTimeout(t);try{v.pause();v.removeAttribute('src');v.load();}catch(e){}res(r);},t=setTimeout(()=>end(0),7000);
   const cb=(n,md)=>{m.push(md.mediaTime);if(m.length>=8){const d=(m[m.length-1]-m[0])/(m.length-1);return end(d>0?1/d:0);}v.requestVideoFrameCallback(cb);};
   v.onloadeddata=()=>{v.requestVideoFrameCallback(cb);v.play().catch(()=>end(0));};v.onerror=()=>end(0);v.src=u;});}
@@ -2858,12 +2859,12 @@ async function webRec(){
   if(!mt){toast('This browser can\u2019t record H.264. Use a recent Chrome, Edge or Safari to record .ts files.',5000);return;}
   try{
     AC=AC||new (window.AudioContext||window.webkitAudioContext)();await AC.resume();xa();
-    const dest=AC.createMediaStreamDestination();[vid,XA].forEach(el=>{if(!el._s){el._s=AC.createMediaElementSource(el);const sh=mkShift(AC,1.04);el._d=AC.createGain();el._p=AC.createGain();el._s.connect(el._d);el._s.connect(sh.inp);sh.out.connect(el._p);el._d.connect(AC.destination);el._p.connect(AC.destination);}el._d.connect(dest);el._p.connect(dest);});if(P.cur)rateApply(P.cur);
+    const dest=AC.createMediaStreamDestination(),recNodes=[];if(P.cur)rateApply(P.cur);const rr=ntscRate(P.cur),keepPitch=rr!==1&&((P.cur&&P.cur.pitch)||S.ntscPitch)!=='pal';[vid,XA].forEach(el=>{if(!el._s){el._s=AC.createMediaElementSource(el);el._d=AC.createGain();el._p=AC.createGain();el._s.connect(el._d);el._d.connect(AC.destination);el._p.gain.value=0;}el._recordingAudio=true;let source=el._s;if(keepPitch){const sh=mkShift(AC,1/rr);el._s.connect(sh.inp);sh.out.connect(dest);recNodes.push({el,nodes:[sh.inp,sh.out]});}else{el._s.connect(dest);recNodes.push({el,nodes:[dest]});}});
     const d=P.dims||[Math.round(720*ratioOf(ch))&~1,720],rc=document.createElement('canvas');rc.width=d[0];rc.height=d[1];const X=rc.getContext('2d'),st=new MediaStream([...rc.captureStream(30).getVideoTracks(),...dest.stream.getAudioTracks()]),mr=new MediaRecorder(st,{mimeType:mt,videoBitsPerSecond:5e6,audioBitsPerSecond:160e3}),mx=tsMux();
-    WR={mr,dest,q:Promise.resolve(),name:ch.name,tm:setInterval(()=>recFrame(X,rc.width,rc.height),33),subs:{},t0:Date.now(),map:null};
+    WR={mr,dest,recNodes,q:Promise.resolve(),name:ch.name,tm:setInterval(()=>recFrame(X,rc.width,rc.height),33),subs:{},t0:Date.now(),map:null};
     [...vid.textTracks].forEach(t=>{t.mode='hidden';});if(P.cur&&P.mode==='video')recMap(vid.currentTime,ntscRate(P.cur));
     mr.ondataavailable=e=>{if(e.data&&e.data.size)WR.q=WR.q.then(async()=>mx.push(new Uint8Array(await e.data.arrayBuffer())));};
-    mr.onstop=async()=>{const w=WR;clearInterval(w.tm);await w.q;recSnap();[vid,XA].forEach(el=>{try{el._d.disconnect(w.dest);el._p.disconnect(w.dest);}catch(e){}});const fn=String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-');saveBlob(mx.end(),fn+'.ts');recSubs(w,fn);WR=null;const b=$('#recBtn');if(b)b.textContent='Record';toast('Recording saved as .ts');};
+    mr.onstop=async()=>{const w=WR;if(!w)return;clearInterval(w.tm);await w.q;recSnap();(w.recNodes||[]).forEach(({el,nodes})=>{try{if(nodes[0]===w.dest)el._s.disconnect(w.dest);else{el._s.disconnect(nodes[0]);nodes[1].disconnect(w.dest);}}catch(e){}el._recordingAudio=false;try{if(el._d)el._d.gain.value=1;if(el._p)el._p.gain.value=0;}catch(e){}});WR=null;if(P.cur)rateApply(P.cur);const fn=String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-');saveBlob(mx.end(),fn+'.ts');recSubs(w,fn);const b=$('#recBtn');if(b)b.textContent='Record';toast('Recording saved as .ts');};
     mr.start(1000);const b=$('#recBtn');if(b)b.textContent='Stop rec';toast('Recording .ts. It records what you hear and the picture, so keep sound on. Tap Record again to stop.',5000);
   }catch(e){WR=null;toast('Couldn\u2019t start recording',4000);}
 }
@@ -2875,7 +2876,7 @@ function recFrame(X,cw,chh){
   X.globalAlpha=1;X.globalCompositeOperation='source-over';X.shadowColor='transparent';X.fillStyle='#000';X.fillRect(0,0,cw,chh);
   if(P.mode==='video'&&vid.videoWidth){const vw=vid.videoWidth,vh=vid.videoHeight,fit=P.ch&&P.ch.fit;try{
     if(fit==='stretch')X.drawImage(vid,0,0,cw,chh);
-    else if(fit==='149'&&z149(cw,chh,vw/vh)){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;X.save();X.beginPath();X.rect((cw-bw)/2,(chh-bh)/2,bw,bh);X.clip();X.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);X.restore();}
+    else if((fit==='149'||fit==='149-43'||fit==='149-169')&&z149(cw,chh,vw/vh,fit)){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;X.save();X.beginPath();X.rect((cw-bw)/2,(chh-bh)/2,bw,bh);X.clip();X.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);X.restore();}
     else{const k=fit==='fill'?Math.max(cw/vw,chh/vh):Math.min(cw/vw,chh/vh),w=vw*k,h=vh*k;X.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);}
   }catch(e){}}
   else if(P.mode==='bars'){['#c0c0c0','#c0c000','#00c0c0','#00c000','#c000c0','#c00000','#0000c0'].forEach((q,i)=>{X.fillStyle=q;X.fillRect(i*cw/7,0,cw/7+1,chh);});}
@@ -2946,7 +2947,10 @@ function setMode(m){
 const ASPECTS=[['16:9',16/9],['4:3',4/3],['21:9',21/9],['3:2',3/2],['1:1',1],['9:16',9/16]];
 const RES_LIST=[0,240,360,480,576,720,1080,1440];
 /* 14:9 zoom: 16:9 video in a 4:3 channel, or 4:3 video in a 16:9 channel. Anything else plays as normal Fit */
-const z149=(cw,chh,vr)=>{const c=cw/chh,w=v=>Math.abs(vr-v)<0.1;return (c>1.2&&c<1.45&&w(16/9))||(c>1.65&&c<1.9&&w(4/3));};
+const z149=(cw,chh,vr,fit)=>{const c=cw/chh,w=v=>Math.abs(vr-v)<0.1;
+  return fit==='149-43' ? (c>1.2&&c<1.45&&w(16/9)) :
+    fit==='149-169' ? (c>1.65&&c<1.9&&w(4/3)) :
+    ((c>1.2&&c<1.45&&w(16/9))||(c>1.65&&c<1.9&&w(4/3)));};
 const ratioOf=ch=>{const a=ASPECTS.find(x=>x[0]===(ch&&ch.aspect));return a?a[1]:16/9;};
 function picDims(ch){
   const res=ch&&ch.res||0; if(!res)return null;
@@ -2962,7 +2966,7 @@ let lastDrawT=-1,RAF=0;
 function applyPicture(){
   const ch=P.ch; if(!ch)return;
   vid.style.objectFit=ch.fit==='fill'?'cover':ch.fit==='stretch'?'fill':'contain';
-  P.dims=picDims(ch)||(ch.fit==='149'?[Math.round(720*ratioOf(ch))&~1,720]:null); lastDrawT=-1;
+  P.dims=picDims(ch)||(['149','149-43','149-169'].includes(ch.fit)?[Math.round(720*ratioOf(ch))&~1,720]:null); lastDrawT=-1;
   if(P.dims){vcan.width=P.dims[0];vcan.height=P.dims[1];}
   setMode(P.mode||'black'); fitPlayer(); pipSync();
 }
@@ -2975,7 +2979,7 @@ function drawLoop(){
   vctx.fillStyle='#000'; vctx.fillRect(0,0,cw,chh);
   try{
     if(fit==='stretch')vctx.drawImage(vid,0,0,cw,chh);
-    else if(fit==='149'&&z149(cw,chh,vw/vh)){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;vctx.save();vctx.beginPath();vctx.rect((cw-bw)/2,(chh-bh)/2,bw,bh);vctx.clip();vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);vctx.restore();}
+    else if((fit==='149'||fit==='149-43'||fit==='149-169')&&z149(cw,chh,vw/vh,fit)){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;vctx.save();vctx.beginPath();vctx.rect((cw-bw)/2,(chh-bh)/2,bw,bh);vctx.clip();vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);vctx.restore();}
     else{const k=fit==='fill'?Math.max(cw/vw,chh/vh):Math.min(cw/vw,chh/vh),w=vw*k,h=vh*k;vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);}
   }catch(e){}
   subDraw();
@@ -3148,13 +3152,15 @@ function paintPicEd(){
   const asp=ch.aspect||'16:9',res=ch.res||0,fit=ch.fit||'fit',d=picDims(ch);
   $('#pAspect').innerHTML=ASPECTS.map(([k])=>`<button class="btn sm${asp===k?'':' soft'}" data-act="pic-aspect" data-v="${k}">${k}</button>`).join('');
   $('#pRes').innerHTML=RES_LIST.map(r=>`<button class="btn sm${res===r?'':' soft'}" data-act="pic-res" data-v="${r}">${r?r+'p':'Auto'}</button>`).join('');
-  const b149=$('#pFit149'); if(b149)b149.hidden=asp!=='4:3'&&asp!=='16:9'; /* 14:9 zoom is for 4:3 and 16:9 channels */
+  const b149a=$('#pFit149a'),b149b=$('#pFit149b');
+  if(b149a)b149a.hidden=asp!=='4:3';
+  if(b149b)b149b.hidden=asp!=='16:9';
   document.querySelectorAll('#pFit .btn').forEach(b=>b.classList.toggle('soft',b.dataset.v!==fit));
-  $('#picInfo').innerHTML=`${asp}<br>${d?d[0]+' &times; '+d[1]:'Device resolution'}<br><span style="font-size:.8em;opacity:.85">${fit==='fill'?'Fill (crops edges)':fit==='stretch'?'Stretch':fit==='149'?'14:9 zoom (crops to a 14:9 window)':'Fit (black bars)'}</span>`;
+  $('#picInfo').innerHTML=`${asp}<br>${d?d[0]+' &times; '+d[1]:'Device resolution'}<br><span style="font-size:.8em;opacity:.85">${fit==='fill'?'Fill (crops edges)':fit==='stretch'?'Stretch':fit==='149-43'?'16:9 → 14:9 zoom (4:3)':fit==='149-169'?'4:3 → 14:9 zoom (16:9)':fit==='149'?'14:9 zoom (crops to a 14:9 window)':'Fit (black bars)'}</span>`;
 }
 function picSet(act,v){
   const ch=PE&&getCh(PE.chId); if(!ch)return;
-  if(act==='pic-aspect'){ch.aspect=v==='16:9'?undefined:v; if(v!=='4:3'&&v!=='16:9'&&ch.fit==='149')ch.fit=undefined;}
+  if(act==='pic-aspect'){ch.aspect=v==='16:9'?undefined:v; if(v!=='4:3'&&ch.fit==='149-43')ch.fit=undefined;if(v!=='16:9'&&ch.fit==='149-169')ch.fit=undefined;}
   else if(act==='pic-res')ch.res=Number(v)||0;
   else ch.fit=v==='fit'?undefined:v;
   save(); paintPicEd();
@@ -3838,6 +3844,7 @@ document.addEventListener('click',e=>{
 
 /* Android app hooks */
 if(window.TVAndroid)document.documentElement.classList.add('android');
+window.tvBusy=()=>!!(STR.live||CAST.on||WR||STR.state==='starting'||STR.state==='connecting'||$('#player').classList.contains('open'));
 window.tvBack=function(){
   const open=q=>$(q).classList.contains('open');
   if(open('#renameDlg')){closeRename();return true;}
@@ -3916,7 +3923,21 @@ function closeNotice(hide){
 <script>
 /* Home-screen web app: offline cache + ask the browser to keep stored videos */
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-  window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});
+  window.addEventListener('load',function(){
+    var had=!!navigator.serviceWorker.controller,rl=false;
+    /* never let the browser reuse an old copy of sw.js, and look for a new version on open, on return to the app and every 30 min */
+    navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(reg){
+      var chk=function(){try{reg.update();}catch(e){}};
+      chk();document.addEventListener('visibilitychange',function(){if(!document.hidden)chk();});setInterval(chk,30*60*1000);
+    }).catch(function(){});
+    /* when a new version takes over, reload into it, unless something is playing, streaming or recording */
+    navigator.serviceWorker.addEventListener('controllerchange',function(){
+      if(!had||rl)return;
+      var busy=false;try{busy=window.tvBusy&&window.tvBusy();}catch(e){}
+      if(busy){var t=document.getElementById('toast');if(t){t.textContent='Update ready. Close and reopen the app to use it';t.classList.add('on');setTimeout(function(){t.classList.remove('on');},6000);}return;}
+      rl=true;location.reload();
+    });
+  });
 }
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 </script>
