@@ -1,6 +1,6 @@
 /* TV Studio service worker: works offline after the first visit.
    Bump VER when you upload a new index.html so devices drop the old copy. */
-const VER = 'tvstudio-v2';
+const VER = 'tvstudio-v3';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

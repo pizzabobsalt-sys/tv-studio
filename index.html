@@ -984,6 +984,7 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
         <button class="btn soft sm" data-act="pic-fit" data-v="fit">Fit</button>
         <button class="btn soft sm" data-act="pic-fit" data-v="fill">Fill</button>
         <button class="btn soft sm" data-act="pic-fit" data-v="stretch">Stretch</button>
+        <button class="btn soft sm" data-act="pic-fit" data-v="149">14:9</button>
       </div>
       <button class="btn danger" data-act="pic-reset">Reset to default</button>
     </aside>
@@ -1688,6 +1689,7 @@ function schedRows(){
       <input class="dt tt" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" autocapitalize="off" size="9" placeholder="HH:MM:SS" value="${timeStr(en.start)}" aria-label="Start time (type it)"${en.timed?'':' disabled'}>
       <label class="chk dyl"${en.timed?'':' hidden'}><input class="dy" type="checkbox"${en.daily?' checked':''}> Repeat daily</label>
       <label class="chk"><input class="sb" type="checkbox"${en.noBug?'':' checked'}> Show screenbug</label>
+      ${S.ntsc&&S.ntsc!=='off'?`<label class="chk">Pitch if sped up <select class="pt"><option value="">Default (${S.ntscPitch==='pal'?'PAL':'NTSC'})</option><option value="keep"${(en.pitch!==undefined?en.pitch:en.item&&en.item.pitch)==='keep'?' selected':''}>NTSC pitch</option><option value="pal"${(en.pitch!==undefined?en.pitch:en.item&&en.item.pitch)==='pal'?' selected':''}>PAL pitch</option></select></label>`:''}
     </div>`).join('');
 }
 function openSched(mode,ch,entries){
@@ -1726,10 +1728,10 @@ $('#schedList').addEventListener('change',ev=>{
 function saveSched(){
   const ch=getCh(SC.chId); const n=SC.entries.length;
   if(SC.mode==='add'){
-    SC.entries.forEach(en=>ch.items.push({id:uid(),fileId:en.fileId,name:en.name,duration:en.duration,start:en.timed?en.start:null,daily:en.timed&&en.daily,noBug:!!en.noBug,bad:false}));
+    SC.entries.forEach(en=>ch.items.push({id:uid(),fileId:en.fileId,name:en.name,duration:en.duration,start:en.timed?en.start:null,daily:en.timed&&en.daily,noBug:!!en.noBug,bad:false,srcDur:en.srcDur,ntsc:en.ntsc,pitch:en.pitch||undefined}));
     const pl=SC.entries.filter(e=>!e.timed).length;
     toast(pl===n?`Added ${n} to the playlist`:pl?`Added ${n}: ${n-pl} scheduled, ${pl} in the playlist`:`Scheduled ${n} video${n>1?'s':''}`);
-  }else SC.entries.forEach(en=>{en.item.start=en.timed?en.start:null;en.item.daily=en.timed&&en.daily;en.item.noBug=!!en.noBug;});
+  }else SC.entries.forEach(en=>{en.item.start=en.timed?en.start:null;en.item.daily=en.timed&&en.daily;en.item.noBug=!!en.noBug;if(en.pitch!==undefined)en.item.pitch=en.pitch||undefined;});
   save(); closeSched(false);
 }
 function closeSched(cancel){
@@ -1769,7 +1771,7 @@ function pipButton(){const b=$('#pipBtn');if(b)b.hidden=!pipOK();}
 pipButton();
 
 /* ---------- update log ---------- */
-const APP_VERSION='1.9';
+const APP_VERSION='1.10';
 const UPDATES=[
   {v:'1.8',date:'17.10.2026',items:[
     'Control menu redesigned to fit on a phone: the picture sits on the left and every section is shown at once as small cards (like OBS). Tap Tabs to switch to one section at a time',
@@ -2759,7 +2761,7 @@ const xa=()=>XA||(XA=Object.assign(document.createElement('audio'),{preload:'aut
 const xaOn=()=>!!(P.cur&&typeof P.cur.aud==='string'&&P.cur.aud[0]==='x');
 const ntscRate=it=>{const m=S.ntsc;return (m==='all'||(m==='auto'&&it&&it.ntsc))?1.04:1;};
 function setPitch(el,keep){['preservesPitch','webkitPreservesPitch','mozPreservesPitch'].forEach(k=>{try{el[k]=keep;}catch(e){}});}
-function rateApply(it){const r=ntscRate(it),k=S.ntscPitch!=='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,k);});}
+function rateApply(it){const r=ntscRate(it),k=((it&&it.pitch)||S.ntscPitch)!=='pal';[vid,XA].forEach(el=>{if(!el)return;try{el.defaultPlaybackRate=r;el.playbackRate=r;}catch(e){}setPitch(el,k);});}
 function detectFps(u){return new Promise(res=>{const v=document.createElement('video');if(!v.requestVideoFrameCallback)return res(0);v.muted=true;v.playsInline=true;const m=[],end=r=>{clearTimeout(t);try{v.pause();v.removeAttribute('src');v.load();}catch(e){}res(r);},t=setTimeout(()=>end(0),7000);
   const cb=(n,md)=>{m.push(md.mediaTime);if(m.length>=8){const d=(m[m.length-1]-m[0])/(m.length-1);return end(d>0?1/d:0);}v.requestVideoFrameCallback(cb);};
   v.onloadeddata=()=>{v.requestVideoFrameCallback(cb);v.play().catch(()=>end(0));};v.onerror=()=>end(0);v.src=u;});}
@@ -2783,6 +2785,7 @@ async function applyTracks(it){
 }
 function subDraw(){const c=SUBT&&SUBT.activeCues;if(!c||!c.length)return;const cw=vcan.width,H=vcan.height,fs=Math.round(H*0.055),L=[];vctx.font='700 '+fs+'px Inter,sans-serif';vctx.textAlign='center';vctx.textBaseline='bottom';vctx.lineWidth=fs/6;vctx.lineJoin='round';vctx.strokeStyle='#000';vctx.fillStyle='#fff';[...c].forEach(q=>L.push(...String(q.text).replace(/<[^>]+>/g,'').split('\n')));let y=H-fs*0.8;for(let i=L.length-1;i>=0;i--){vctx.strokeText(L[i],cw/2,y);vctx.fillText(L[i],cw/2,y);y-=fs*1.2;}}
 function xaSync(){const e=XA;if(!e||!e._f)return;if(!xaOn()||vid.paused||P.mode!=='video'){if(!e.paused)e.pause();return;}if(Math.abs(e.currentTime-vid.currentTime)>0.35){try{e.currentTime=vid.currentTime;}catch(_){}}if(e.paused)e.play().catch(()=>{});}
+$('#schedList').addEventListener('change',e=>{const t=e.target.closest&&e.target.closest('.pt');if(t&&SC)SC.entries[+t.closest('.srow').dataset.i].pitch=t.value;});
 vid.addEventListener('timeupdate',xaSync);vid.addEventListener('pause',xaSync);vid.addEventListener('seeked',xaSync);
 function pickFiles(accept,multi){return new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept=accept;i.multiple=!!multi;i.onchange=()=>res([...i.files]);i.click();});}
 function openTracks(){
@@ -2963,7 +2966,7 @@ let lastDrawT=-1,RAF=0;
 function applyPicture(){
   const ch=P.ch; if(!ch)return;
   vid.style.objectFit=ch.fit==='fill'?'cover':ch.fit==='stretch'?'fill':'contain';
-  P.dims=picDims(ch); lastDrawT=-1;
+  P.dims=picDims(ch)||(ch.fit==='149'?[Math.round(720*ratioOf(ch))&~1,720]:null); lastDrawT=-1;
   if(P.dims){vcan.width=P.dims[0];vcan.height=P.dims[1];}
   setMode(P.mode||'black'); fitPlayer(); pipSync();
 }
@@ -2976,6 +2979,7 @@ function drawLoop(){
   vctx.fillStyle='#000'; vctx.fillRect(0,0,cw,chh);
   try{
     if(fit==='stretch')vctx.drawImage(vid,0,0,cw,chh);
+    else if(fit==='149'&&vw/vh<14/9-0.01){const R=14/9,bw=cw/chh>R?chh*R:cw,bh=bw/R,k=Math.max(bw/vw,bh/vh),w=vw*k,h=vh*k;vctx.save();vctx.beginPath();vctx.rect((cw-bw)/2,(chh-bh)/2,bw,bh);vctx.clip();vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);vctx.restore();}
     else{const k=fit==='fill'?Math.max(cw/vw,chh/vh):Math.min(cw/vw,chh/vh),w=vw*k,h=vh*k;vctx.drawImage(vid,(cw-w)/2,(chh-h)/2,w,h);}
   }catch(e){}
   subDraw();
@@ -3129,7 +3133,7 @@ function paintPicEd(){
   $('#pAspect').innerHTML=ASPECTS.map(([k])=>`<button class="btn sm${asp===k?'':' soft'}" data-act="pic-aspect" data-v="${k}">${k}</button>`).join('');
   $('#pRes').innerHTML=RES_LIST.map(r=>`<button class="btn sm${res===r?'':' soft'}" data-act="pic-res" data-v="${r}">${r?r+'p':'Auto'}</button>`).join('');
   document.querySelectorAll('#pFit .btn').forEach(b=>b.classList.toggle('soft',b.dataset.v!==fit));
-  $('#picInfo').innerHTML=`${asp}<br>${d?d[0]+' &times; '+d[1]:'Device resolution'}<br><span style="font-size:.8em;opacity:.85">${fit==='fill'?'Fill (crops edges)':fit==='stretch'?'Stretch':'Fit (black bars)'}</span>`;
+  $('#picInfo').innerHTML=`${asp}<br>${d?d[0]+' &times; '+d[1]:'Device resolution'}<br><span style="font-size:.8em;opacity:.85">${fit==='fill'?'Fill (crops edges)':fit==='stretch'?'Stretch':fit==='149'?'14:9 (4:3 is cropped to 14:9)':'Fit (black bars)'}</span>`;
 }
 function picSet(act,v){
   const ch=PE&&getCh(PE.chId); if(!ch)return;
