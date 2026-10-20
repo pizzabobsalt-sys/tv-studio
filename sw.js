@@ -1,8 +1,9 @@
 /* Service worker for the TV Studio web app.
-   Keeps the app shell available offline without caching live streams or recordings. */
+   Keeps the app shell available offline without caching live streams or recordings.
+   Browser FFmpeg fallback is loaded on demand from its CDN and needs a network connection on first use. */
 'use strict';
 
-const CACHE_NAME = 'tv-studio-shell-v4';
+const CACHE_NAME = 'tv-studio-shell-v5';
 const APP_SHELL = ['./', './index.html'];
 
 self.addEventListener('install', event => {

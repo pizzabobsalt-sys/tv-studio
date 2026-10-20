@@ -3104,6 +3104,66 @@ function closePlayer(){
   pipSync();
   if(tab==='programming'){if($('#epg'))paintEpg(false);else renderProgramming();}
 }
+/* Browser-only compatibility fallback. Native playback stays the fast path; FFmpeg.wasm is loaded only after a native decode/format failure. Converted files are session-cached and do not replace the user's originals. */
+const transcodeURLCache=new Map();
+let ffmpegLoadPromise=null;
+async function loadBrowserFFmpeg(){
+  if(!ffmpegLoadPromise)ffmpegLoadPromise=(async()=>{
+    if(!window.crossOriginIsolated&&typeof SharedArrayBuffer!=='undefined'){
+      /* The single-threaded core below does not require cross-origin isolation. */
+    }
+    const mod=await import('https://esm.sh/@ffmpeg/ffmpeg@0.12.10');
+    const ff=new mod.FFmpeg();
+    const blobURL=async(u,type)=>{const r=await fetch(u,{mode:'cors'});if(!r.ok)throw new Error('Could not download the browser video decoder ('+r.status+')');return URL.createObjectURL(new Blob([await r.arrayBuffer()],{type}));};
+    const coreURL=await blobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js','text/javascript');
+    const wasmURL=await blobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm','application/wasm');
+    await ff.load({coreURL,wasmURL});
+    return {ff,coreURL,wasmURL};
+  })();
+  return ffmpegLoadPromise;
+}
+async function transcodeForBrowser(fileId,sourceURL){
+  if(transcodeURLCache.has(fileId))return transcodeURLCache.get(fileId);
+  if(isNat(fileId))throw new Error('Automatic conversion is available for videos stored in this browser, not Android-native media URLs.');
+  const original=await getFile(fileId);
+  if(!original)throw new Error('The original video file is unavailable.');
+  const size=original.size||0;
+  if(size>1024*1024*1024)throw new Error('This video is too large for safe in-browser conversion (limit: 1 GB). Larger files can exceed browser/WebAssembly memory limits.');
+  if(!navigator.onLine)throw new Error('Internet access is needed to download the optional browser decoder.');
+  const {ff}=await loadBrowserFFmpeg();
+  const ext=((original.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8)||'bin';
+  const input='input.'+ext,output='compatible.mp4';
+  const bytes=new Uint8Array(await original.arrayBuffer());
+  const ffLogs=[];
+  const logHandler=({message=''})=>{if(message)ffLogs.push(message);};
+  try{
+    await ff.writeFile(input,bytes);
+    ff.on('log',logHandler);
+    /* Probe stream descriptions during input parsing. MP4 can carry text subtitles as mov_text, but cannot preserve bitmap subtitle formats such as PGS/VobSub as native selectable MP4 tracks. */
+    await ff.exec(['-hide_banner','-i',input]).catch(()=>-1); // Input-only probe exits immediately after listing streams.
+    const textSubtitleCodecs=new Set(['subrip','srt','ass','ssa','webvtt','text','mov_text']);
+    const subtitleMaps=[];
+    for(const line of ffLogs){
+      const m=line.match(/Stream #0:(\d+)(?:\([^)]*\))?: Subtitle: ([^,\s]+)/i);
+      if(m&&textSubtitleCodecs.has(m[2].toLowerCase()))subtitleMaps.push(m[1]);
+    }
+    const args=['-y','-i',input,'-map','0:v:0','-map','0:a?'];
+    for(const streamIndex of [...new Set(subtitleMaps)])args.push('-map','0:'+streamIndex);
+    args.push('-dn','-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-c:s','mov_text','-movflags','+faststart',output);
+    ffLogs.length=0;
+    const code=await ff.exec(args);
+    if(code!==0)throw new Error('The browser decoder could not convert this codec/container. Bitmap subtitles (for example PGS/VobSub) cannot be converted to selectable MP4 text tracks in this browser fallback.');
+    const out=await ff.readFile(output);
+    if(!out||!out.length)throw new Error('Conversion produced an empty video.');
+    const u=URL.createObjectURL(new Blob([out],{type:'video/mp4'}));
+    transcodeURLCache.set(fileId,u);
+    return u;
+  }finally{
+    try{ff.off('log',logHandler);}catch(_){}
+    try{await ff.deleteFile(input);}catch(_){}
+    try{await ff.deleteFile(output);}catch(_){}
+  }
+}
 function markBad(it,bad,err){
   const e=bad?(err||'unknown error'):undefined;
   if(it.bad!==bad||it.err!==e){it.bad=bad;if(bad)it.err=e;else delete it.err;save();}
@@ -3114,8 +3174,8 @@ async function loadItem(info,t){
   let url=await getURL(it.fileId);
   if(t!==P.token)return;
   if(!url){markBad(it,true,'file is missing');setMode('bars');return;}
-  let wd=0,tries=0,triedAlt=false;
-  const arm=()=>{clearTimeout(wd);wd=setTimeout(()=>{if(t===P.token&&P.mode==='loading'){markBad(it,true,'took too long to open');setMode('bars');}},25000);};
+  let wd=0,tries=0,triedAlt=false,triedTranscode=false;
+  const arm=(ms=25000)=>{clearTimeout(wd);wd=setTimeout(()=>{if(t===P.token&&P.mode==='loading'){markBad(it,true,'took too long to open');setMode('bars');}},ms);};
   arm();
   vid.onloadedmetadata=()=>{
     if(t!==P.token)return; clearTimeout(wd); markBad(it,false);
@@ -3131,6 +3191,19 @@ async function loadItem(info,t){
     if(tries<2){tries++;setMode('loading');arm();vid.src=url;vid.load();return;}
     if(!triedAlt&&isNat(it.fileId)&&url.indexOf('/media/')!==0){triedAlt=true;tries=0;url='/media/'+it.fileId;setMode('loading');arm();vid.src=url;vid.load();return;}
     const c=vid.error?vid.error.code:0;
+    /* Only attempt heavyweight conversion after the native player has failed. Do not loop if the converted MP4 also fails. */
+    if(!triedTranscode&&!isNat(it.fileId)&&[3,4].includes(c)){
+      triedTranscode=true;tries=0;setMode('loading');clearTimeout(wd);toast('Unsupported video format. Preparing a compatible copy…',5000);arm(10*60*1000);
+      transcodeForBrowser(it.fileId,url).then(converted=>{
+        if(t!==P.token)return;clearTimeout(wd);url=converted;setMode('loading');arm(10*60*1000);vid.src=url;vid.load();
+      }).catch(err=>{
+        if(t!==P.token)return;clearTimeout(wd);
+        const why=(err&&err.message)||'conversion failed';
+        markBad(it,true,'native playback failed; compatibility conversion failed: '+why);
+        setMode('bars');
+      });
+      return;
+    }
     const detail=((vid.error&&vid.error.message)||'').replace(/\s+/g,' ').slice(0,100);
     markBad(it,true,(({1:'loading was stopped',2:'network error',3:'decode error',4:'format not supported'})[c]||'unknown error')+(detail?' ('+detail+')':''));
     setMode('bars');
