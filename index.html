@@ -3152,7 +3152,10 @@ async function transcodeForBrowser(fileId,sourceURL){
     args.push('-dn','-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-c:s','mov_text','-movflags','+faststart',output);
     ffLogs.length=0;
     const code=await ff.exec(args);
-    if(code!==0)throw new Error('The browser decoder could not convert this codec/container. Bitmap subtitles (for example PGS/VobSub) cannot be converted to selectable MP4 text tracks in this browser fallback.');
+    if(code!==0){
+      const tail=ffLogs.slice(-8).map(x=>x.trim()).filter(Boolean).join(' | ').slice(-700);
+      throw new Error('FFmpeg could not convert this MKV/codec combination (exit '+code+').'+(tail?' Decoder details: '+tail:'')+' Bitmap subtitles such as PGS/VobSub are not supported as selectable MP4 tracks by this fallback.');
+    }
     const out=await ff.readFile(output);
     if(!out||!out.length)throw new Error('Conversion produced an empty video.');
     const u=URL.createObjectURL(new Blob([out],{type:'video/mp4'}));
@@ -3191,9 +3194,10 @@ async function loadItem(info,t){
     if(tries<2){tries++;setMode('loading');arm();vid.src=url;vid.load();return;}
     if(!triedAlt&&isNat(it.fileId)&&url.indexOf('/media/')!==0){triedAlt=true;tries=0;url='/media/'+it.fileId;setMode('loading');arm();vid.src=url;vid.load();return;}
     const c=vid.error?vid.error.code:0;
-    /* Only attempt heavyweight conversion after the native player has failed. Do not loop if the converted MP4 also fails. */
-    if(!triedTranscode&&!isNat(it.fileId)&&[3,4].includes(c)){
-      triedTranscode=true;tries=0;setMode('loading');clearTimeout(wd);toast('Unsupported video format. Preparing a compatible copy…',5000);arm(10*60*1000);
+    /* Try conversion after repeated failure for local browser-stored files. Some browsers report an MKV/container problem as a network or unspecified media error rather than code 3/4. Do not retry if playback was explicitly aborted, and never loop on the converted MP4. */
+    if(!triedTranscode&&!isNat(it.fileId)&&c!==1){
+      triedTranscode=true;tries=0;setMode('loading');clearTimeout(wd);
+      toast('Native playback failed. Preparing a compatible copy with the browser decoder…',6000);arm(10*60*1000);
       transcodeForBrowser(it.fileId,url).then(converted=>{
         if(t!==P.token)return;clearTimeout(wd);url=converted;setMode('loading');arm(10*60*1000);vid.src=url;vid.load();
       }).catch(err=>{
