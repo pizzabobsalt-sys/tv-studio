@@ -5,7 +5,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'tv-studio-shell-v12';
+const CACHE_NAME = 'tv-studio-shell-v13';
 const APP_SHELL = ['./', './index.html'];
 
 self.addEventListener('install', event => {
