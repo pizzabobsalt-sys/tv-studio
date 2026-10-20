@@ -624,7 +624,7 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
 <div id="loading"><div class="lg"></div><h2>TV Studio</h2><div class="lbar"><i></i></div><div class="lmsg" id="lmsg">Starting up...</div></div>
 <div class="app">
   <header>
-    <div class="brand"><div class="logo"></div><h1>TV Studio</h1></div>
+    <div class="brand" id="tvStudioHome" role="button" tabindex="0" aria-label="Return to mode selection" title="Return to mode selection" style="cursor:pointer"><div class="logo"></div><h1>TV Studio</h1></div>
     <nav class="tabs" id="tabs" data-i="0">
       <div class="ind"></div>
       <button class="tab on" data-act="tab" data-tab="programming">Programming</button>
@@ -3063,7 +3063,7 @@ async function webRec(){
     WR={mr,dest,recNodes,q:Promise.resolve(),name:ch.name,tm:setInterval(()=>recFrame(X,rc.width,rc.height),33),subs:{},t0:Date.now(),map:null};
     [...vid.textTracks].forEach(t=>{t.mode='hidden';});if(P.cur&&P.mode==='video')recMap(vid.currentTime,ntscRate(P.cur));
     mr.ondataavailable=e=>{if(e.data&&e.data.size)WR.q=WR.q.then(async()=>mx.push(new Uint8Array(await e.data.arrayBuffer())));};
-    mr.onstop=async()=>{const w=WR;if(!w)return;clearInterval(w.tm);await w.q;recSnap();(w.recNodes||[]).forEach(({el,nodes})=>{try{if(nodes[0]===w.dest)el._s.disconnect(w.dest);else{el._s.disconnect(nodes[0]);nodes[1].disconnect(w.dest);}}catch(e){}el._recordingAudio=false;try{if(el._d)el._d.gain.value=1;if(el._p)el._p.gain.value=0;}catch(e){}});WR=null;if(P.cur)rateApply(P.cur);const fn=String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-');saveBlob(mx.end(),fn+'.ts');recSubs(w,fn);const b=$('#recBtn');if(b)b.textContent='Record';toast('Recording saved as .ts');};
+    mr.onstop=async()=>{const w=WR;if(!w)return;clearInterval(w.tm);await w.q;recSnap();(w.recNodes||[]).forEach(({el,nodes})=>{try{if(nodes[0]===w.dest)el._s.disconnect(w.dest);else{el._s.disconnect(nodes[0]);nodes[1].disconnect(w.dest);}}catch(e){}el._recordingAudio=false;try{if(el._d)el._d.gain.value=1;if(el._p)el._p.gain.value=0;}catch(e){}});WR=null;if(P.cur)rateApply(P.cur);const fn=String(w.name).replace(/[^\w\- ]+/g,'_')+' '+dateStr(Date.now())+' '+timeStr(Date.now()).replace(/:/g,'-');const fakeBlob=mx.end();const fakeId='fake-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);try{if(typeof window.__tvStudioSaveFakeRecording!=='function')throw new Error('Recording library is not ready; reload the page and try again.');await window.__tvStudioSaveFakeRecording({id:fakeId,started:Date.now(),name:fn,kind:'fake',count:1,bytes:fakeBlob.size,status:'saved'}, {key:fakeId+'-file',recId:fakeId,index:0,type:'fake',blob:fakeBlob});toast('Fake-channel recording saved in TV Studio Recordings');}catch(err){saveBlob(fakeBlob,fn+'.ts');toast('Could not save in library; downloaded recording instead. '+err.message,5000);}recSubs(w,fn);const b=$('#recBtn');if(b)b.textContent='Record';};
     mr.start(1000);const b=$('#recBtn');if(b)b.textContent='Stop rec';toast('Recording .ts. It records what you hear and the picture, so keep sound on. Tap Record again to stop.',5000);
   }catch(e){WR=null;toast('Couldn\u2019t start recording',4000);}
 }
@@ -4338,5 +4338,179 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http')){
 }
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 </script>
+
+<style>
+#tvModeChooser,#iptvStudio{position:fixed;inset:0;z-index:1000000;background:var(--bg,#f3f3f5);color:var(--ink,#111);font:16px system-ui,-apple-system,sans-serif;overflow:auto;padding:calc(22px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px))}
+#tvModeChooser{display:flex;align-items:center;justify-content:center}
+.tv-mode-card{width:min(100%,520px);margin:auto;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:20px;padding:24px;box-sizing:border-box}
+.tv-mode-card h1{margin:0 0 8px;font-size:25px}.tv-mode-card p{color:var(--muted,#666);line-height:1.5}
+.tv-mode-btn{display:block;width:100%;padding:18px 14px;border:1px solid var(--line,#ddd);border-radius:14px;background:var(--card,#fff);color:var(--ink,#111);font:inherit;text-align:left;margin-top:12px}
+.tv-mode-btn strong{display:block;font-size:17px}.tv-mode-btn span{display:block;font-size:13px;color:var(--muted,#666);margin-top:5px}
+#iptvStudio{display:none;z-index:999999;box-sizing:border-box}
+.iptv-top{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:16px}
+.iptv-btn{border:1px solid var(--line,#ddd);background:var(--card,#fff);color:var(--ink,#111);padding:10px 13px;border-radius:10px;font:inherit;cursor:pointer}
+.iptv-btn.primary{background:var(--p,#111);color:var(--on-p,#fff)}
+.iptv-tools{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.iptv-input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--line,#ddd);border-radius:10px;background:var(--card,#fff);color:var(--ink,#111);font:inherit}
+.iptv-channel{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid var(--line,#ddd);border-radius:12px;margin:8px 0;background:var(--card,#fff)}
+.iptv-channel button{flex-shrink:0}.iptv-channel .iptv-name{flex:1;min-width:0;overflow-wrap:anywhere}
+#iptvVideo{display:block;width:100%;max-height:48vh;background:#000;border-radius:12px;margin:12px 0}
+#iptvMsg{font-size:14px;color:var(--muted,#666);white-space:pre-wrap;margin:10px 0}
+</style>
+<div id="tvModeChooser" role="dialog" aria-modal="true" aria-label="Choose TV Studio mode">
+ <div class="tv-mode-card"><h1>TV Studio</h1><p>Choose which type of channels you want to use. Your existing channels and programming stay unchanged.</p>
+  <button class="tv-mode-btn" id="tvFakeMode"><strong>Fake Channels</strong><span>Your existing TV Studio channels, video schedules, PAL settings and graphics.</span></button>
+  <button class="tv-mode-btn" id="tvRealMode"><strong>Real IPTV Channels</strong><span>Import existing M3U/M3U8 playlists from a file or online link and play available streams.</span></button>
+ </div>
+</div>
+<section id="iptvStudio" aria-label="Real IPTV channels">
+ <div class="iptv-top"><div><h1 style="margin:0">Real IPTV Channels</h1><div style="color:var(--muted,#666);font-size:13px">Imported playlists are kept separately from Fake Channels.</div></div><button class="iptv-btn" id="iptvBack">← Choose mode</button></div>
+ <div class="iptv-tools"><button class="iptv-btn primary" id="iptvPick">Import playlist file</button><input id="iptvFile" type="file" accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain" hidden><button class="iptv-btn" id="iptvExport">Export imported channels</button><button class="iptv-btn" id="iptvShowRecordings">Recordings</button></div>
+ <label for="iptvUrl">Playlist URL</label><div class="iptv-tools"><input class="iptv-input" id="iptvUrl" type="url" placeholder="https://example.com/playlist.m3u" autocapitalize="off" spellcheck="false"><button class="iptv-btn primary" id="iptvLoadUrl">Import URL</button><button class="iptv-btn" id="iptvOpenUrl" type="button">Open URL in Safari</button></div>
+ <div id="iptvMsg" role="status">Import a playlist file or paste a direct playlist URL. URL imports may be blocked by the playlist host's browser-access policy (CORS).</div>
+ <video id="iptvVideo" controls playsinline webkit-playsinline preload="metadata"></video>
+ <div id="iptvNow" style="font-weight:700;margin:8px 0">No channel selected</div>
+ <div class="iptv-tools" id="iptvTrackTools" style="display:none"><label style="flex:1;min-width:140px">Audio track<select id="iptvAudioTrack" class="iptv-input"><option value="-1">Default audio</option></select></label><label style="flex:1;min-width:140px">Subtitles<select id="iptvSubtitleTrack" class="iptv-input"><option value="-1">Off / default</option></select></label></div>
+ <input id="iptvSearch" class="iptv-input" type="search" placeholder="Search imported channels…" style="margin:8px 0">
+ <div id="iptvImportPreview" style="display:none;border:1px solid var(--line,#ddd);border-radius:12px;padding:12px;margin:12px 0"><strong>Choose channels to import</strong><p id="iptvPreviewInfo" style="font-size:13px"></p><div class="iptv-tools"><button class="iptv-btn" id="iptvSelectAll">Select all</button><button class="iptv-btn primary" id="iptvConfirmImport">Import selected</button><button class="iptv-btn" id="iptvCancelImport">Cancel</button></div><div id="iptvPreviewList"></div></div><div class="iptv-tools"><button class="iptv-btn" id="iptvRecordStart" disabled>Record selected channel</button><button class="iptv-btn" id="iptvRecordStop" disabled>Stop recording</button></div><div id="iptvRecordings" style="display:none;border:1px solid var(--line,#ddd);border-radius:12px;padding:12px;margin:12px 0"><strong>Recordings library</strong><p style="font-size:13px">Recordings are stored in this browser on this device. Keep TV Studio open in the foreground. The recorder can try to mux the selected audio into MP4 when you download. This uses a large browser-based FFmpeg module and may fail on unsupported streams or long recordings; keep this page open.</p><div id="iptvRecordingList"></div><button class="iptv-btn" id="iptvRecordingsBack">Back to channels</button></div><div id="iptvList"></div>
+ <p style="font-size:12px;color:var(--muted,#666);line-height:1.5">Live streams play in their original format. TV Studio does not convert IPTV streams to PAL. HLS (.m3u8) usually works best in Safari; some other stream types may not play. Only import streams you are authorized to access.</p>
+</section>
+<script>
+(function(){
+'use strict';
+const chooser=document.getElementById('tvModeChooser'),studio=document.getElementById('iptvStudio');
+const STORE='tvstudio:iptv:v1';
+let channels=[];
+try{const v=JSON.parse(localStorage.getItem(STORE)||'[]');if(Array.isArray(v))channels=v;}catch(e){}
+const $=id=>document.getElementById(id);
+const msg=t=>{$('iptvMsg').textContent=t;};
+const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function save(){try{localStorage.setItem(STORE,JSON.stringify(channels));}catch(e){msg('Could not save this playlist in browser storage. It may be too large. Export a copy for backup.');}}
+function parseM3U(text,baseURL){
+ const lines=String(text).replace(/^\uFEFF/,'').split(/\r?\n/),out=[];let name='',group='';
+ for(const raw of lines){const line=raw.trim();if(!line)continue;
+  if(/^#EXTINF/i.test(line)){const comma=line.indexOf(',');name=comma>=0?line.slice(comma+1).trim():'';const g=line.match(/(?:group-title|group)\s*=\s*"([^"]*)"/i);group=g?g[1]:'';if(!name){const n=line.match(/tvg-name\s*=\s*"([^"]*)"/i);if(n)name=n[1];}continue;}
+  if(line[0]==='#')continue;let resolved='';try{resolved=baseURL?new URL(line,baseURL).href:(/^https?:\/\//i.test(line)?line:'');}catch(_){}if(/^https?:\/\//i.test(resolved)){out.push({id:'iptv-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),name:name||line,group,url:resolved,selected:true});name='';group='';}
+ }return out;
+}
+async function parseM3UStream(stream,baseURL,label){
+ const reader=stream.getReader(),decoder=new TextDecoder();let carry='',name='',group='',count=0,seen=new Set(),out=[];const MAX=1000;
+ function lineParse(line){line=line.trim();if(!line)return;if(/^#EXTINF/i.test(line)){const comma=line.indexOf(',');name=comma>=0?line.slice(comma+1).trim():'';const g=line.match(/(?:group-title|group)\s*=\s*"([^"]*)"/i);group=g?g[1]:'';if(!name){const n=line.match(/tvg-name\s*=\s*"([^"]*)"/i);if(n)name=n[1];}return;}if(line[0]==='#')return;let url='';try{url=baseURL?new URL(line,baseURL).href:(/^https?:\/\//i.test(line)?line:'');}catch(_){}if(/^https?:\/\//i.test(url)&&out.length<MAX){if(!seen.has(url)){out.push({id:'iptv-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),name:name||line,group,url,selected:true});seen.add(url);}}name='';group='';}
+ try{while(true){const {value,done}=await reader.read();if(done)break;carry+=decoder.decode(value,{stream:true});let ix;while((ix=carry.indexOf('\n'))>=0){lineParse(carry.slice(0,ix).replace(/\r$/,''));carry=carry.slice(ix+1);count++;if(count%50000===0)msg('Reading '+label+' in chunks… '+count.toLocaleString()+' lines; '+out.length.toLocaleString()+' channels found.');}}carry+=decoder.decode();if(carry)lineParse(carry);}
+ finally{reader.releaseLock();}return {channels:out,lines:count,limited:out.length>=MAX};
+}
+let pendingImport=[];
+function showImportPreview(found,label,limited){pendingImport=found;const box=$('iptvImportPreview');box.style.display='block';$('iptvPreviewInfo').textContent=`${found.length.toLocaleString()} channels found in ${label}. Choose the entries to add. ${limited?'The preview limit of 1,000 unique channels was reached; import another smaller playlist for the remainder.':''}`;$('iptvPreviewList').innerHTML=found.map((c,i)=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--line,#ddd)"><input type="checkbox" data-preview-index="${i}" checked style="margin-top:4px"><span><strong>${esc(c.name)}</strong>${c.group?`<small style="display:block">${esc(c.group)}</small>`:''}<small style="display:block;overflow-wrap:anywhere;color:var(--muted,#666)">${esc(c.url)}</small></span></label>`).join('');msg('Review the playlist and select the channels you want to import.');box.scrollIntoView({behavior:'smooth',block:'start'});}
+function importText(text,label){const found=parseM3U(text,/^https?:\/\//i.test(label)?label:undefined);if(!found.length){msg('No HTTP/HTTPS channel URLs were found. This may be a media-segment playlist rather than a channel list.');return;}showImportPreview(found,label,false);}
+async function importStream(stream,label,baseURL){const r=await parseM3UStream(stream,baseURL,label);if(!r.channels.length){msg('No channel URLs found in '+label+'. This may be a single-stream HLS media manifest rather than an IPTV channel list.');return;}showImportPreview(r.channels,label,r.limited);}
+function render(){
+ const q=$('iptvSearch').value.trim().toLowerCase(),list=channels.filter(c=>(c.name+' '+(c.group||'')+' '+c.url).toLowerCase().includes(q));
+ $('iptvList').innerHTML=list.length?list.map(c=>`<div class="iptv-channel"><div class="iptv-name"><strong>${esc(c.name)}</strong>${c.group?`<div style="font-size:12px;color:var(--muted,#666)">${esc(c.group)}</div>`:''}</div><button class="iptv-btn primary" data-iptv-play="${esc(c.id)}">Play</button><button class="iptv-btn" data-iptv-remove="${esc(c.id)}" aria-label="Remove ${esc(c.name)}">×</button></div>`).join(''):'<p>No imported channels match. Import an M3U/M3U8 playlist to begin.</p>';
+}
+function importText(text,label){
+ const found=parseM3U(text,/^https?:\/\//i.test(label)?label:undefined);
+ if(!found.length){msg('No HTTP/HTTPS channel URLs were found in this playlist. Check that this is an M3U channel list, not a single HLS media manifest.');return;}
+ const seen=new Set(channels.map(c=>c.url));let added=0;
+ found.forEach(c=>{if(!seen.has(c.url)){channels.push(c);seen.add(c.url);added++;}});
+ save();render();msg(`Imported ${added} new channel(s) from ${label}. ${found.length-added} duplicate(s) skipped. Total: ${channels.length}.`);
+}
+function showModeChooser(){
+ chooser.style.display='flex';studio.style.display='none';
+ const v=$('iptvVideo');v.pause();v.removeAttribute('src');v.load();
+}
+const home=$('tvStudioHome');
+home.addEventListener('click',showModeChooser);
+home.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();showModeChooser();}});
+$('tvFakeMode').addEventListener('click',()=>{chooser.style.display='none';studio.style.display='none';});
+$('tvRealMode').addEventListener('click',()=>{chooser.style.display='none';studio.style.display='block';render();});
+$('iptvBack').addEventListener('click',showModeChooser);
+$('iptvPick').addEventListener('click',()=>$('iptvFile').click());
+$('iptvFile').addEventListener('change',async e=>{const f=e.target.files&&e.target.files[0];if(!f)return;try{if(f.stream)await importStream(f.stream(),f.name,undefined);else importText(await f.text(),f.name);}catch(err){msg('Could not read playlist: '+err.message);}e.target.value='';});
+$('iptvOpenUrl').addEventListener('click',()=>{const raw=$('iptvUrl').value.trim();if(!/^https?:\/\//i.test(raw)){msg('Enter a valid http:// or https:// URL first.');return;}window.open(raw,'_blank','noopener');msg('Opened the link in a new Safari tab if pop-ups are allowed. If it displays playlist text, use Share > Save to Files, then import the saved file here. Opening a link does not bypass CORS.');});
+$('iptvLoadUrl').addEventListener('click',async()=>{
+ let url=$('iptvUrl').value.trim();if(!/^https?:\/\//i.test(url)){msg('Enter a valid http:// or https:// playlist URL.');return;}
+ try{url=new URL(url).href;}catch(_){msg('That URL is not valid.');return;}
+ msg('Fetching playlist…');try{const r=await fetch(url,{mode:'cors',credentials:'omit',cache:'no-store',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status+' ('+r.statusText+')');const ct=r.headers.get('content-type')||'';if(!r.body)throw new Error('This browser does not expose a streaming response reader');await importStream(r.body,url,url);}catch(e){msg('Safari could not read the playlist response ('+(e&&e.message||String(e))+'). If the URL opens in Safari but import fails, the host probably blocks cross-origin reads (CORS). A webpage cannot safely bypass that restriction without a server. Try Open URL in Safari, save/download the playlist to Files, then use Import playlist file. If it requires a login, use a playlist link you are authorized to access that does not depend on browser-only cookies.');}
+});
+function refreshIPTVTracks(){const v=$('iptvVideo'),tools=$('iptvTrackTools'),a=$('iptvAudioTrack'),t=$('iptvSubtitleTrack');if(!v||!tools)return;const at=v.audioTracks,tt=v.textTracks;a.innerHTML='<option value="-1">Default audio</option>';t.innerHTML='<option value="-1">Off / default</option>';let ac=0,tc=0;if(at&&at.length){for(let i=0;i<at.length;i++){const tr=at[i],o=document.createElement('option');o.value=String(i);o.textContent=tr.label||tr.language||('Audio '+(i+1));a.appendChild(o);ac++;}}if(tt&&tt.length){for(let i=0;i<tt.length;i++){const tr=tt[i],o=document.createElement('option');o.value=String(i);o.textContent=tr.label||tr.language||('Subtitle '+(i+1));t.appendChild(o);tc++;}}tools.style.display='flex';a.disabled=!ac;t.disabled=!tc;if(!ac&&!tc)msg('Safari does not expose selectable audio/subtitle tracks for this stream. The stream may still contain additional tracks, but this page cannot control them through Safari.');}
+$('iptvVideo').addEventListener('loadedmetadata',refreshIPTVTracks);$('iptvVideo').addEventListener('loadeddata',refreshIPTVTracks);
+$('iptvAudioTrack').addEventListener('change',()=>{const a=$('iptvVideo').audioTracks;if(!a)return;const n=Number($('iptvAudioTrack').value);for(let i=0;i<a.length;i++)a[i].enabled=n<0?i===0:i===n;});
+$('iptvSubtitleTrack').addEventListener('change',()=>{const t=$('iptvVideo').textTracks;if(!t)return;const n=Number($('iptvSubtitleTrack').value);for(let i=0;i<t.length;i++)t[i].mode=n===i?'showing':'disabled';});
+$('iptvExport').addEventListener('click',()=>{
+ if(!channels.length){msg('There are no imported channels to export yet.');return;}
+ const text='#EXTM3U\n'+channels.map(c=>`#EXTINF:-1${c.group?' group-title="'+String(c.group).replace(/["\r\n]/g,'')+'"':''},${String(c.name).replace(/[\r\n]/g,' ')}\n${c.url}`).join('\n')+'\n';
+ const blob=new Blob([text],{type:'audio/x-mpegurl;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='tv-studio-iptv.m3u';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),3000);msg('Playlist exported as tv-studio-iptv.m3u.');
+});
+$('iptvSearch').addEventListener('input',render);
+$('iptvList').addEventListener('click',e=>{
+ const p=e.target.closest('[data-iptv-play]'),r=e.target.closest('[data-iptv-remove]');
+ if(r){const c=channels.find(x=>x.id===r.dataset.iptvRemove);if(!c)return;if(!confirm('Remove '+c.name+' from imported IPTV channels?'))return;channels=channels.filter(x=>x.id!==c.id);save();render();return;}
+ if(p){const c=channels.find(x=>x.id===p.dataset.iptvPlay);if(!c)return;const v=$('iptvVideo');v.pause();v.removeAttribute('src');v.load();$('iptvTrackTools').style.display='none';v.src=c.url;$('iptvNow').textContent='Now playing: '+c.name;msg('Opening stream…');const pr=v.play();if(pr&&pr.catch)pr.catch(err=>msg('Playback did not start. Tap Play on the video controls, or check that the stream is compatible with Safari and does not require unsupported authentication. '+err.message));else msg('Stream opened.');}
+});
+// Chunked import selection controls
+$('iptvSelectAll').addEventListener('click',()=>document.querySelectorAll('[data-preview-index]').forEach(x=>x.checked=true));
+$('iptvCancelImport').addEventListener('click',()=>{$('iptvImportPreview').style.display='none';pendingImport=[];});
+$('iptvConfirmImport').addEventListener('click',()=>{const chosen=[...document.querySelectorAll('[data-preview-index]:checked')].map(x=>pendingImport[Number(x.dataset.previewIndex)]).filter(Boolean);const seen=new Set(channels.map(c=>c.url));let added=0;for(const c of chosen){if(!seen.has(c.url)){channels.push(c);seen.add(c.url);added++;}}save();render();$('iptvImportPreview').style.display='none';pendingImport=[];msg(`Imported ${added} selected channel(s); duplicates skipped. Total saved: ${channels.length}.`);});
+// IndexedDB stores each original TS segment separately so a long recording is not accumulated in RAM.
+const DB='tvstudio-iptv-recordings-v1',META='recordingMeta',SEGS='recordingSegments';let dbp=null,rec=null,selectedChannel=null;
+function openRecDB(){if(dbp)return dbp;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(DB,1);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(META))d.createObjectStore(META,{keyPath:'id'});if(!d.objectStoreNames.contains(SEGS)){const st=d.createObjectStore(SEGS,{keyPath:'key'});st.createIndex('byRec','recId',{unique:false});}};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
+async function idbPut(store,val){const d=await openRecDB();return new Promise((resolve,reject)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(val);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
+window.__tvStudioSaveFakeRecording=async function(meta,segment){await idbPut(META,meta);await idbPut(SEGS,segment);await refreshRecordings();};
+async function idbAll(store){const d=await openRecDB();return new Promise((resolve,reject)=>{const r=d.transaction(store,'readonly').objectStore(store).getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error);});}
+async function idbDeleteRecording(id){const d=await openRecDB();return new Promise((resolve,reject)=>{const tx=d.transaction([META,SEGS],'readwrite'),ix=tx.objectStore(SEGS).index('byRec'),req=ix.openCursor(IDBKeyRange.only(id));req.onsuccess=()=>{const c=req.result;if(c){c.delete();c.continue();}else tx.objectStore(META).delete(id);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
+function absURL(u,b){return new URL(u,b).href;}
+async function fetchText(url){const r=await fetch(url,{cache:'no-store',credentials:'omit'});if(!r.ok)throw Error('HTTP '+r.status+' fetching '+url);return await r.text();}
+function parseHLS(text,url){const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),variants=[],segments=[],audios=[],subs=[];let pending=null;for(let i=0;i<lines.length;i++){const l=lines[i];if(l.startsWith('#EXT-X-STREAM-INF:')){pending=l;continue;}if(l.startsWith('#EXT-X-MEDIA:')){const typ=(l.match(/TYPE=([^,]+)/)||[])[1],u=(l.match(/URI="([^"]+)"/)||[])[1],name=(l.match(/NAME="([^"]+)"/)||[])[1]||'';if(u&&typ==='AUDIO')audios.push({url:absURL(u,url),name});if(u&&typ==='SUBTITLES')subs.push({url:absURL(u,url),name});continue;}if(l[0]==='#')continue;if(pending){variants.push({url:absURL(l,url),info:pending});pending=null;}else segments.push({url:absURL(l,url),duration:Number((lines[i-1]||'').replace('#EXTINF:','').split(',')[0])||0});}return {variants,segments,audios,subs,end:lines.includes('#EXT-X-ENDLIST'),target:Number((text.match(/#EXT-X-TARGETDURATION:(\d+)/)||[])[1])||6};}
+// FFmpeg.wasm is loaded only when a recording is exported. This remuxes (does not re-encode) compatible TS video/audio into MP4.
+let ffmpegPromise=null;
+async function getFFmpeg(){
+ if(ffmpegPromise)return ffmpegPromise;
+ ffmpegPromise=new Promise((resolve,reject)=>{
+  if(window.FFmpeg&&window.FFmpeg.createFFmpeg){resolve(window.FFmpeg);return;}
+  const sc=document.createElement('script');sc.src='https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';sc.onload=()=>window.FFmpeg?resolve(window.FFmpeg):reject(Error('FFmpeg library did not initialise'));sc.onerror=()=>reject(Error('Could not load FFmpeg from CDN; check your internet connection'));document.head.appendChild(sc);
+ });return ffmpegPromise;
+}
+async function remuxToMP4(videoBlob,audioBlob,audioIndex,name){
+ msg('Loading FFmpeg to build a playable recording… This can take time and memory on iPhone/iPad.');
+ const F=await getFFmpeg();const ff=F.createFFmpeg({log:false,corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'});await ff.load();
+ const writeBlob=async(file,blob)=>ff.FS('writeFile',file,new Uint8Array(await blob.arrayBuffer()));
+ await writeBlob('video.ts',videoBlob);
+ const args=['-i','video.ts'];
+ if(audioBlob){await writeBlob('audio.ts',audioBlob);args.push('-i','audio.ts','-map','0:v:0','-map','1:a:0');}
+ else {args.push('-map','0:v:0');if(Number.isInteger(audioIndex)&&audioIndex>=0)args.push('-map',`0:a:${audioIndex}`);else args.push('-map','0:a:0?');}
+ args.push('-c','copy','-movflags','+faststart','output.mp4');
+ try{await ff.run(...args);const data=ff.FS('readFile','output.mp4');return new Blob([data.buffer],{type:'video/mp4'});}finally{try{ff.exit();}catch(_){}}
+}
+async function refreshRecordings(){try{const list=await idbAll(META);$('iptvRecordingList').innerHTML=list.length?list.sort((a,b)=>b.started-a.started).map(r=>`<div class="iptv-channel"><div class="iptv-name"><strong>${esc(r.name)}${r.kind==='fake'?' · Fake channel':' · Real IPTV'}</strong><small style="display:block">${new Date(r.started).toLocaleString()} · ${r.kind==='fake'?'Recorded playback':' '+r.count+' TS segment(s)'} · ${(r.bytes/1048576).toFixed(1)} MB · ${esc(r.status)}</small></div><button class="iptv-btn primary" data-rec-download="${esc(r.id)}">Download recording</button><button class="iptv-btn" data-rec-delete="${esc(r.id)}">Delete</button></div>`).join(''):'<p>No saved recordings on this device.</p>';}catch(e){$('iptvRecordingList').textContent='Recording storage is unavailable: '+e.message;}}
+$('iptvShowRecordings').addEventListener('click',()=>{$('iptvRecordings').style.display='block';$('iptvList').style.display='none';$('iptvRecordings').scrollIntoView({behavior:'smooth'});refreshRecordings();});$('iptvRecordingsBack').addEventListener('click',()=>{$('iptvRecordings').style.display='none';$('iptvList').style.display='block';});
+$('iptvList').addEventListener('click',e=>{const b=e.target.closest('[data-iptv-play]');if(b){selectedChannel=channels.find(c=>c.id===b.dataset.iptvPlay)||null;$('iptvRecordStart').disabled=!selectedChannel||!!rec;}});
+$('iptvRecordStart').addEventListener('click',async()=>{
+ if(!selectedChannel||rec)return;
+ try{
+  const id='rec-'+Date.now().toString(36),started=Date.now();
+  rec={id,started,name:selectedChannel.name,url:selectedChannel.url,count:0,bytes:0,seen:new Set(),timer:null,stopped:false,audioCount:0,audioBytes:0,audioSeen:new Set(),audioIndex:Number($('iptvAudioTrack').value)};
+  let masterText=await fetchText(rec.url),master=parseHLS(masterText,rec.url),playlistURL=rec.url,audioURL='';
+  if(master.variants.length){
+   if(master.audios.length){const choices=master.audios.map((a,i)=>`${i+1}. ${a.name||'Audio '+(i+1)}${a.default?' (default)':''}${a.language?' ['+a.language+']':''}`).join('\n');const answer=prompt('Choose the audio track to include in the recording:\n'+choices+'\n\nEnter its number (1-'+master.audios.length+'). Cancel to use embedded audio if available.');if(answer!==null){const n=Number(answer)-1;if(Number.isInteger(n)&&n>=0&&n<master.audios.length)audioURL=master.audios[n].url;else {alert('Invalid audio selection. Recording cancelled.');rec=null;return;}}}
+   playlistURL=master.variants[0].url;
+  }
+  rec.videoPlaylist=playlistURL;rec.audioPlaylist=audioURL;
+  await idbPut(META,{id,started,name:rec.name,count:0,bytes:0,status:'recording'});
+  $('iptvRecordStart').disabled=true;$('iptvRecordStop').disabled=false;
+  msg(audioURL?'Recording video plus selected separate audio track. CORS access to both playlists and all segments is required.':'Recording video segments. The selected embedded audio track will be mapped during export where supported.');
+  async function saveSegments(url,type){const text=await fetchText(url),h=parseHLS(text,url);for(const seg of h.segments){const seen=type==='audio'?rec.audioSeen:rec.seen;if(seen.has(seg.url))continue;seen.add(seg.url);if(!/\.ts(?:$|\?)/i.test(seg.url))continue;const r=await fetch(seg.url,{cache:'no-store',credentials:'omit'});if(!r.ok)throw Error('HTTP '+r.status+' downloading '+type+' segment');const blob=await r.blob();if(!blob.size)continue;const index=type==='audio'?rec.audioCount:rec.count;await idbPut(SEGS,{key:id+'-'+type+'-'+String(index).padStart(9,'0'),recId:id,index,type,blob,url:seg.url,duration:seg.duration});if(type==='audio'){rec.audioCount++;rec.audioBytes+=blob.size;}else{rec.count++;rec.bytes+=blob.size;}}return h;}
+  async function tick(){if(!rec||rec.id!==id||rec.stopped)return;try{const h=await saveSegments(playlistURL,'video');if(audioURL)await saveSegments(audioURL,'audio');await idbPut(META,{id,started,name:rec.name,count:rec.count,bytes:rec.bytes,audioCount:rec.audioCount,audioBytes:rec.audioBytes,audioPlaylist:audioURL,audioIndex:rec.audioIndex,status:'recording'});msg(`Recording ${rec.name}: video ${rec.count} segments; selected separate audio ${rec.audioCount} segments. Keep this page open.`);if(!h.end)rec.timer=setTimeout(tick,Math.max(3000,h.target*500));else stopRec('complete');}catch(err){msg('Recording paused/failed: '+err.message+'. CORS, authentication, or iOS suspension may prevent recording.');rec.timer=setTimeout(tick,10000);}}
+  tick();
+ }catch(e){rec=null;msg('Could not start recorder: '+e.message);}
+});
+async function stopRec(status='stopped'){if(!rec)return;const r=rec;rec=null;r.stopped=true;clearTimeout(r.timer);try{await idbPut(META,{id:r.id,started:r.started,name:r.name,count:r.count,bytes:r.bytes,audioCount:r.audioCount||0,audioBytes:r.audioBytes||0,audioPlaylist:r.audioPlaylist||'',audioIndex:Number.isInteger(r.audioIndex)?r.audioIndex:-1,status});}catch(e){}$('iptvRecordStart').disabled=!selectedChannel;$('iptvRecordStop').disabled=true;msg(`Recording ${status}. Saved ${r.count} original TS segments (${(r.bytes/1048576).toFixed(1)} MB). No transcoding was performed; separate audio/subtitle playlists are not included.`);refreshRecordings();}
+$('iptvRecordStop').addEventListener('click',()=>stopRec('stopped by user'));
+$('iptvRecordingList').addEventListener('click',async e=>{const d=e.target.closest('[data-rec-delete]'),b=e.target.closest('[data-rec-download]');try{if(d){if(confirm('Delete this recording permanently from this browser?')){await idbDeleteRecording(d.dataset.recDelete);refreshRecordings();}return;}if(b){const id=b.dataset.recDownload,all=(await idbAll(SEGS)).filter(x=>x.recId===id).sort((a,b)=>a.index-b.index);const meta=(await idbAll(META)).find(x=>x.id===id);if(meta?.kind==='fake'){const item=all.find(x=>x.type==='fake');if(!item){alert('Saved fake-channel recording data is missing.');return;}const u=URL.createObjectURL(item.blob),a=document.createElement('a');a.href=u;a.download=(meta.name||'tv-studio-fake-recording').replace(/[^\w.-]+/g,'_')+'.ts';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),60000);msg('Fake-channel recording downloaded.');return;}const video=all.filter(x=>!x.type||x.type==='video'),audio=all.filter(x=>x.type==='audio');if(!video.length){alert('No saved video segments found.');return;}const vb=new Blob(video.map(x=>x.blob),{type:'video/mp2t'}),ab=audio.length?new Blob(audio.map(x=>x.blob),{type:'video/mp2t'}):null;let blob,ext;if(ab||Number.isInteger(meta?.audioIndex)&&meta.audioIndex>=0){try{blob=await remuxToMP4(vb,ab,meta?.audioIndex,meta?.name||'recording');ext='.mp4';}catch(err){msg('MP4 mux failed: '+err.message+'. Downloading original video TS instead; selected audio may not be isolated.');blob=vb;ext='.ts';}}else{blob=vb;ext='.ts';}const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=(meta?.name||'tv-studio-recording').replace(/[^\w.-]+/g,'_')+ext;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),60000);msg('Download prepared. '+(ext==='.mp4'?'FFmpeg remux completed; check the selected audio and playback.':'Original TS fallback downloaded; this does not guarantee only the selected audio is present.'));}}catch(err){msg('Recording action failed: '+err.message);}});
+window.addEventListener('pagehide',()=>{if(rec)stopRec('page closed; recording stopped').catch(()=>{});});
+refreshRecordings();
+render();
+})();
+</script>
+
 </body>
 </html>
