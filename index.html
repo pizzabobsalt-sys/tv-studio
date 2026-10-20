@@ -624,7 +624,7 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
 </style>
 </head>
 <body>
-<div id="loading"><div class="lg"></div><h2>TV Studio</h2><div class="lbar"><i></i></div><div class="lmsg" id="lmsg">Starting up...</div></div>
+<div id="loading"><div class="lg"></div><h2>TV Studio</h2><div class="lbar"><i></i></div><div class="lmsg" id="lmsg">Starting up...</div><div class="lmsg" style="opacity:.6">Build 2026-10-20b</div></div>
 <div class="app">
   <header>
     <div class="brand" id="tvStudioHome" role="button" tabindex="0" aria-label="Return to mode selection" title="Return to mode selection" style="cursor:pointer"><div class="logo"></div><h1>TV Studio</h1></div>
@@ -4327,7 +4327,7 @@ try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
  </div>
 </div>
 <section id="iptvStudio" aria-label="Real IPTV channels">
- <div class="iptv-top"><div><h1 style="margin:0">Real IPTV Channels</h1><div style="color:var(--muted,#666);font-size:13px">Imported playlists are kept separately from Fake Channels.</div></div><button class="iptv-btn" id="iptvBack">← Choose mode</button></div>
+ <div class="iptv-top"><div><h1 style="margin:0">Real IPTV Channels</h1><div style="color:var(--muted,#666);font-size:13px">Imported playlists are kept separately from Fake Channels. · Build 2026-10-20b</div></div><button class="iptv-btn" id="iptvBack">← Choose mode</button></div>
  <div class="iptv-tools"><button class="iptv-btn primary" id="iptvPick">Import playlist file</button><button class="iptv-btn" id="iptvCancelReading" disabled>Cancel import</button><input id="iptvFile" type="file" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" tabindex="-1"><button class="iptv-btn" id="iptvExport">Export imported channels</button><button class="iptv-btn" id="iptvShowRecordings">Recordings</button></div>
  <label for="iptvUrl">Playlist URL</label><div class="iptv-tools"><input class="iptv-input" id="iptvUrl" type="url" placeholder="https://example.com/playlist.m3u" autocapitalize="off" spellcheck="false"><button class="iptv-btn primary" id="iptvLoadUrl">Import URL</button><button class="iptv-btn" id="iptvOpenUrl" type="button">Open URL in Safari</button></div>
  <div id="iptvMsg" role="status">Import a playlist file or paste a direct playlist URL. URL imports may be blocked by the playlist host's browser-access policy (CORS).</div>
