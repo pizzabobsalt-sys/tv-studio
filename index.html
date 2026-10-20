@@ -426,6 +426,21 @@ input[type=range]{width:100%;accent-color:var(--p);height:28px}
 .noticebtns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .busy{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:90;background:var(--ink);color:var(--bg);padding:16px 22px;border-radius:18px;font-weight:700;font-size:14px;max-width:80vw;text-align:center;display:none}
 .busy.on{display:block}
+.conversion-track{
+  width:100%;
+  height:10px;
+  margin-top:12px;
+  background:rgba(128,128,128,.3);
+  border-radius:10px;
+  overflow:hidden;
+}
+#conversion-fill{
+  width:0%;
+  height:100%;
+  background:#36b37e;
+  border-radius:10px;
+  transition:width .25s ease;
+}
 .tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;max-width:760px}
 .tgrid .btn{justify-content:flex-start;text-align:left}
 .tsec{font-size:12.5px;color:var(--muted);margin:14px 2px 6px}
@@ -1019,7 +1034,12 @@ html.pip #player.open #pwrap{inset:0!important;height:100%!important;padding:0!i
   </div>
 </div>
 
-<div class="busy" id="busy"></div>
+<div class="busy" id="busy">
+  <div id="busy-label">Preparing conversion...</div>
+  <div class="conversion-track">
+    <div id="conversion-fill"></div>
+  </div>
+</div>
 <div id="offline">
   <svg class="nowifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16.2a5 5 0 0 1 7 0"/><circle cx="12" cy="20" r=".8" fill="currentColor"/><path d="M3 3l18 18"/></svg>
   <h2>No internet connection</h2>
@@ -1213,7 +1233,13 @@ function parseTime(str){
   if(h>23||m>59||sec>59)return null;
   return [h,m,sec];
 }
-function showBusy(msg){const b=$('#busy');b.textContent=msg;b.classList.add('on');}
+function showBusy(msg){
+  const b=$('#busy');
+  const label=$('#busy-label');
+  if(label) label.textContent=msg;
+  else b.textContent=msg;
+  b.classList.add('on');
+}
 function hideBusy(){$('#busy').classList.remove('on');}
 function fitPic(pic,box,ratio){ratio=ratio||16/9;
   const r=box.getBoundingClientRect(); const cs=getComputedStyle(box);
@@ -1487,7 +1513,113 @@ function renderEditor(){
   $('#loopOn').className='btn '+(ch.loop?'':'soft');
   $('#pauseBtnE').textContent=ch.pausedAt?'Resume programming':'Pause programming';
 }
-$('#ename').addEventListener('input',e=>{const ch=getCh(E);if(ch){ch.name=e.target.value||'Untitled';save();}});
+
+$('#fv').addEventListener('change', async e => {
+  const ch = getCh(E);
+  const files = [...e.target.files];
+  e.target.value = '';
+
+  if (!ch || !files.length) return;
+
+  showBusy('Reading ' + files.length + ' video' +
+    (files.length > 1 ? 's' : '') + '...');
+
+  const entries = [];
+  let fail = 0;
+  let lastErr = '';
+
+  const iosSafari =
+    /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' &&
+     navigator.maxTouchPoints > 1);
+
+  for (const f of files) {
+    const fid = uid();
+    const originalURL = URL.createObjectURL(f);
+    let metaURL = originalURL;
+    let revokeMeta = true;
+
+    try {
+      // Save the original file before trying to decode it.
+      await putFile(fid, f);
+
+      const ext = (f.name.split('.').pop() || '')
+        .toLowerCase();
+
+      const shouldConvertEarly =
+        iosSafari &&
+        !['mp4', 'm4v', 'mov'].includes(ext);
+
+      let dur;
+
+      if (shouldConvertEarly) {
+        showBusy('Converting ' + f.name +
+          ' for iPhone/iPad...');
+
+        metaURL = await transcodeForBrowser(
+          fid, originalURL
+        );
+        revokeMeta = false;
+
+        dur = await readDurationUrl(metaURL, false);
+      } else {
+        try {
+          dur = await readDuration(f);
+        } catch (nativeErr) {
+          showBusy('Trying compatibility conversion for ' +
+            f.name + '...');
+
+          metaURL = await transcodeForBrowser(
+            fid, originalURL
+          );
+          revokeMeta = false;
+
+          dur = await readDurationUrl(metaURL, false);
+        }
+      }
+
+      const en = {
+        fileId: fid,
+        name: nameOf(f),
+        duration: dur,
+        timed: true,
+        start: 0,
+        daily: false,
+        manual: false
+      };
+
+      await ntscTag(en, metaURL, revokeMeta);
+      entries.push(en);
+
+    } catch (err) {
+      // Release any converted URL if this import failed.
+      if (transcodeURLCache.has(fid)) {
+        try {
+          URL.revokeObjectURL(
+            transcodeURLCache.get(fid)
+          );
+        } catch (_) {}
+
+        transcodeURLCache.delete(fid);
+      }
+
+      try {
+        await delFile(fid);
+      } catch (_) {}
+
+      fail++;
+      lastErr = (err && err.message) || String(err);
+
+    } finally {
+      try {
+        URL.revokeObjectURL(originalURL);
+      } catch (_) {}
+    }
+  }
+
+  hideBusy();
+  finishImport(ch, entries, fail, lastErr);
+});
 function finishImport(ch,entries,fail,lastErr){
   if(!entries.length){toast('Couldn\u2019t decode '+(fail>1?'those videos':'that video')+'. The file can be selected, but this browser/device may not support its container or video/audio codec.'+(lastErr?' ('+lastErr+')':''),6500);return;}
   const lastEnd=Math.max(0,...ch.items.filter(i=>!i.daily&&i.start!=null).map(i=>i.start+i.duration*1000));
@@ -3109,17 +3241,57 @@ const transcodeURLCache=new Map();
 let ffmpegLoadPromise=null;
 async function loadBrowserFFmpeg(){
   if(!ffmpegLoadPromise)ffmpegLoadPromise=(async()=>{
-    if(!window.crossOriginIsolated&&typeof SharedArrayBuffer!=='undefined'){
-      /* The single-threaded core below does not require cross-origin isolation. */
+    let coreURL=null;
+    let wasmURL=null;
+    let classWorkerURL=null;
+    let stage='starting';
+
+    try{
+      stage='loading FFmpeg JavaScript module';
+      const mod=await import('https://esm.sh/@ffmpeg/ffmpeg@0.12.10');
+      const ff=new mod.FFmpeg();
+
+      const blobURL=async(u,type,label)=>{
+        stage='downloading '+label;
+        const r=await fetch(u,{mode:'cors'});
+        if(!r.ok)throw new Error(label+' download failed: HTTP '+r.status);
+        const data=await r.arrayBuffer();
+        return URL.createObjectURL(new Blob([data],{type}));
+      };
+
+      coreURL=await blobURL(
+        'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
+        'text/javascript',
+        'FFmpeg core JavaScript'
+      );
+
+      wasmURL=await blobURL(
+        'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',
+        'application/wasm',
+        'FFmpeg WebAssembly'
+      );
+
+      stage='preparing FFmpeg worker';
+      classWorkerURL=URL.createObjectURL(new Blob([
+        'import "https://esm.sh/@ffmpeg/ffmpeg@0.12.10/es2022/worker.js";'
+      ],{type:'text/javascript'}));
+
+      stage='starting FFmpeg worker and WebAssembly engine';
+      await ff.load({coreURL,wasmURL,classWorkerURL});
+
+      return {ff,coreURL,wasmURL,classWorkerURL};
+    }catch(err){
+      if(coreURL)try{URL.revokeObjectURL(coreURL);}catch(_){}
+      if(wasmURL)try{URL.revokeObjectURL(wasmURL);}catch(_){}
+      if(classWorkerURL)try{URL.revokeObjectURL(classWorkerURL);}catch(_){}
+
+      throw new Error(
+        'Video converter startup failed while '+stage+': '+
+        ((err&&err.message)||String(err))
+      );
     }
-    const mod=await import('https://esm.sh/@ffmpeg/ffmpeg@0.12.10');
-    const ff=new mod.FFmpeg();
-    const blobURL=async(u,type)=>{const r=await fetch(u,{mode:'cors'});if(!r.ok)throw new Error('Could not download the browser video decoder ('+r.status+')');return URL.createObjectURL(new Blob([await r.arrayBuffer()],{type}));};
-    const coreURL=await blobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js','text/javascript');
-    const wasmURL=await blobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm','application/wasm');
-    await ff.load({coreURL,wasmURL});
-    return {ff,coreURL,wasmURL};
   })();
+
   return ffmpegLoadPromise;
 }
 async function transcodeForBrowser(fileId,sourceURL){
@@ -3135,11 +3307,59 @@ async function transcodeForBrowser(fileId,sourceURL){
   const ext=((original.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8)||'bin';
   const input='input.'+ext,output='compatible.mp4';
   const ffLogs=[];
-  const logHandler=({message=''})=>{if(message)ffLogs.push(message);};
+  const conversionStartedAt=Date.now();
+  let latestProgress=null;
+
+    const updateProgress=()=>{
+    const elapsed=Math.floor((Date.now()-conversionStartedAt)/1000);
+    const mins=Math.floor(elapsed/60);
+    const secs=String(elapsed%60).padStart(2,'0');
+
+    const percent=latestProgress===null
+      ? 0
+      : Math.round(latestProgress*100);
+
+    let etaText='Estimating time remaining...';
+
+    if(latestProgress!==null && latestProgress>0.01){
+      const remaining=Math.max(
+        0,
+        Math.round(elapsed*(1-latestProgress)/latestProgress)
+      );
+      const etaMins=Math.floor(remaining/60);
+      const etaSecs=String(remaining%60).padStart(2,'0');
+      etaText='About '+etaMins+':'+etaSecs+' remaining';
+    }
+
+    showBusy(
+      'Converting video... '+percent+'%'+
+      ' · '+mins+':'+secs+' elapsed'+
+      ' · '+etaText
+    );
+
+    const fill=$('#conversion-fill');
+    if(fill){
+      fill.style.width=percent+'%';
+    }
+  }
+
+  const progressHandler=({progress}={})=>{
+    if(typeof progress==='number'&&Number.isFinite(progress)){
+      latestProgress=Math.max(0,Math.min(1,progress));
+    }
+    updateProgress();
+  };
+
+  const progressTimer=setInterval(updateProgress,1000);
+
+  const logHandler=({message=''}={})=>{
+    if(message)ffLogs.push(message);
+  };
   let mounted=false;
   let inputPath=input;
   try{
     ff.on('log',logHandler);
+ff.on('progress',progressHandler);
     /* WORKERFS lets FFmpeg read the original File/Blob without first copying the entire source into a JS Uint8Array and the WASM filesystem. This reduces peak memory on iOS; it cannot eliminate memory needed by the decoder or final output. */
     try{
       const sourceFile=(typeof File!=='undefined'&&original instanceof File)?original:new File([original],(original.name||input),{type:original.type||'application/octet-stream'});
@@ -3183,6 +3403,8 @@ async function transcodeForBrowser(fileId,sourceURL){
     throw err;
   }finally{
     try{ff.off('log',logHandler);}catch(_){}
+    try{ff.off('progress',progressHandler);}catch(_){}
+    clearInterval(progressTimer);
     try{if(mounted)ff.unmount('/source');}catch(_){}
     try{await ff.deleteFile(input);}catch(_){}
     try{await ff.deleteFile(output);}catch(_){}
