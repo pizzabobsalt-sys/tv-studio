@@ -1,5 +1,4 @@
-
-const CACHE_NAME = "tv-studio-shell-v14";
+const CACHE_NAME = "tv-studio-shell-v15";
 
 const APP_SHELL = [
   "./",
