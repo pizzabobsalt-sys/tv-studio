@@ -1239,6 +1239,8 @@ function parseTime(str){
 }
 function showBusy(msg){
   const b=$('#busy');
+  const tk0=$('#conversion-track');if(tk0)tk0.style.display='none';
+  const cb0=$('#cancelConversion');if(cb0)cb0.style.display='none';
   const label=$('#busy-label');
   if(label) label.textContent=msg;
   else b.textContent=msg;
@@ -1253,8 +1255,9 @@ function showConversionBusy(msg,percent){
 }
 function hideBusy(){
   $('#busy').classList.remove('on');
-  const c=$('#cancelConversion');if(c)c.style.display='none';
+  const c=$('#cancelConversion');if(c){c.style.display='none';c.disabled=false;c.textContent='Cancel conversion';}
   const f=$('#conversion-fill');if(f)f.style.width='0%';
+  const t=$('#conversion-track');if(t)t.style.display='none';
 }
 function fitPic(pic,box,ratio){ratio=ratio||16/9;
   const r=box.getBoundingClientRect(); const cs=getComputedStyle(box);
@@ -1649,20 +1652,6 @@ function finishImport(ch,entries,fail,lastErr){
   openSched('add',ch,entries);
   if(fail)toast(`${fail} video${fail>1?'s':''} couldn\u2019t be read and ${fail>1?'were':'was'} skipped`,4000);
 }
-/* browser fallback (also used if the Android bridge is missing) */
-$('#fv').addEventListener('change',async e=>{
-  const ch=getCh(E); const files=[...e.target.files]; e.target.value='';
-  if(!ch||!files.length)return;
-  showBusy('Reading '+files.length+' video'+(files.length>1?'s':'')+'...');
-  const entries=[]; let fail=0,lastErr='';
-  for(const f of files){
-    try{
-      const dur=await readDuration(f); const fid=uid(); await putFile(fid,f);
-      const en={fileId:fid,name:nameOf(f),duration:dur,timed:true,start:0,daily:false,manual:false};await ntscTag(en,URL.createObjectURL(f),true);entries.push(en);
-    }catch(err){fail++;lastErr=(err&&err.message)||String(err);}
-  }
-  hideBusy(); finishImport(ch,entries,fail,lastErr);
-});
 /* Android: the app copies the videos into its own storage and calls back here */
 window.tvNative={
   pipFailed(){toast('Picture-in-picture isn\u2019t available on this phone, or is switched off for TV Studio in Android settings.',4500);},
@@ -3259,74 +3248,68 @@ function closePlayer(){
 }
 /* Browser-only compatibility fallback. Native playback stays the fast path; FFmpeg.wasm is loaded only after a native decode/format failure. Converted files are session-cached and do not replace the user's originals. */
 const transcodeURLCache=new Map();
-let ffmpegLoadPromise=null;
-let activeConversionFFmpeg=null;
+let ffmpegInstance=null,ffmpegLoadPromise=null;
 let conversionCancelRequested=false;
 let conversionRunning=false;
+const cancelWaiters=new Set();
+const CANCEL_MSG='Conversion cancelled. The original video was kept unchanged.';
 function conversionWasCancelled(){return conversionCancelRequested;}
-function checkConversionCancelled(){if(conversionWasCancelled())throw new Error('Conversion cancelled. The original video was kept unchanged.');}
+function checkConversionCancelled(){if(conversionWasCancelled())throw new Error(CANCEL_MSG);}
+/* Resolves/rejects with the promise, but ALWAYS rejects when Cancel is pressed or the timeout passes,
+   so a hung converter can never leave the screen stuck. */
+function raceCancel(p,timeoutMs,timeoutMsg){
+  return new Promise((res,rej)=>{
+    if(conversionWasCancelled()){rej(new Error(CANCEL_MSG));return;}
+    let done=false,timer=0;
+    const fin=()=>{done=true;clearTimeout(timer);cancelWaiters.delete(w);};
+    const w=()=>{if(done)return;fin();rej(new Error(CANCEL_MSG));};
+    cancelWaiters.add(w);
+    if(timeoutMs)timer=setTimeout(()=>{if(done)return;fin();rej(new Error(timeoutMsg||'Timed out'));},timeoutMs);
+    Promise.resolve(p).then(v=>{if(done)return;fin();res(v);},e=>{if(done)return;fin();rej(e);});
+  });
+}
+function killFFmpeg(){
+  const ff=ffmpegInstance; ffmpegInstance=null; ffmpegLoadPromise=null;
+  try{if(ff&&ff.isLoaded())ff.exit();}catch(_){}
+}
 const cancelConversionButton=$('#cancelConversion');
 if(cancelConversionButton)cancelConversionButton.addEventListener('click',()=>{
   conversionCancelRequested=true;
-  cancelConversionButton.disabled=true;
-  cancelConversionButton.textContent='Cancelling…';
-  showBusy('Cancelling conversion…');
-  const ff=activeConversionFFmpeg;
-  if(ff){activeConversionFFmpeg=null;ffmpegLoadPromise=null;try{ff.terminate();}catch(_){}}
+  [...cancelWaiters].forEach(w=>{try{w();}catch(_){}});
+  cancelWaiters.clear();
+  killFFmpeg();
+  conversionRunning=false;
+  hideBusy(); /* remove the overlay right away: nothing may keep it on screen */
+  toast('Conversion cancelled.',3500);
 });
-async function loadBrowserFFmpeg(){
-  if(!ffmpegLoadPromise)ffmpegLoadPromise=(async()=>{
-    let coreURL=null;
-    let wasmURL=null;
-    let classWorkerURL=null;
-    let stage='starting';
-
-    try{
-      stage='loading FFmpeg JavaScript module';
-      const mod=await import('https://esm.sh/@ffmpeg/ffmpeg@0.12.10');
-      const ff=new mod.FFmpeg();
-
-      const blobURL=async(u,type,label)=>{
-        stage='downloading '+label;
-        const r=await fetch(u,{mode:'cors'});
-        if(!r.ok)throw new Error(label+' download failed: HTTP '+r.status);
-        const data=await r.arrayBuffer();
-        return URL.createObjectURL(new Blob([data],{type}));
-      };
-
-      coreURL=await blobURL(
-        'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
-        'text/javascript',
-        'FFmpeg core JavaScript'
-      );
-
-      wasmURL=await blobURL(
-        'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',
-        'application/wasm',
-        'FFmpeg WebAssembly'
-      );
-
-      stage='preparing FFmpeg worker';
-      classWorkerURL=URL.createObjectURL(new Blob([
-        'import "https://esm.sh/@ffmpeg/ffmpeg@0.12.10/es2022/worker.js";'
-      ],{type:'text/javascript'}));
-
-      stage='starting FFmpeg worker and WebAssembly engine';
-      await ff.load({coreURL,wasmURL,classWorkerURL});
-
-      return {ff,coreURL,wasmURL,classWorkerURL};
-    }catch(err){
-      if(coreURL)try{URL.revokeObjectURL(coreURL);}catch(_){}
-      if(wasmURL)try{URL.revokeObjectURL(wasmURL);}catch(_){}
-      if(classWorkerURL)try{URL.revokeObjectURL(classWorkerURL);}catch(_){}
-
-      throw new Error(
-        'Video converter startup failed while '+stage+': '+
-        ((err&&err.message)||String(err))
-      );
-    }
-  })();
-
+/* last resort: tap the box (when no conversion is running) or press Escape to dismiss it */
+$('#busy').addEventListener('click',e=>{if(e.target.closest('#cancelConversion'))return;if(!conversionRunning)hideBusy();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#busy').classList.contains('on')){if(conversionRunning&&cancelConversionButton)cancelConversionButton.click();else hideBusy();}});
+function loadScriptOnce(src){
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');s.src=src;s.async=true;
+    s.onload=()=>res();s.onerror=()=>{s.remove();rej(new Error('Could not download '+src));};
+    document.head.appendChild(s);
+  });
+}
+/* Single-thread FFmpeg 0.11 loaded with a plain <script> tag: works cross-origin and does not need SharedArrayBuffer */
+async function getFFmpegInstance(){
+  if(ffmpegInstance&&ffmpegInstance.isLoaded())return ffmpegInstance;
+  if(!ffmpegLoadPromise){
+    ffmpegLoadPromise=(async()=>{
+      if(!(window.FFmpeg&&window.FFmpeg.createFFmpeg)){
+        let lastErr=null;
+        for(const src of ['https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js','https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js']){
+          try{await loadScriptOnce(src);if(window.FFmpeg&&window.FFmpeg.createFFmpeg)break;}catch(e){lastErr=e;}
+        }
+        if(!(window.FFmpeg&&window.FFmpeg.createFFmpeg))throw lastErr||new Error('The video converter did not load');
+      }
+      const ff=window.FFmpeg.createFFmpeg({log:false,corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'});
+      await ff.load();
+      ffmpegInstance=ff;
+      return ff;
+    })().catch(e=>{ffmpegLoadPromise=null;throw e;});
+  }
   return ffmpegLoadPromise;
 }
 async function transcodeForBrowser(fileId,sourceURL){
@@ -3336,121 +3319,57 @@ async function transcodeForBrowser(fileId,sourceURL){
   if(!original)throw new Error('The original video file is unavailable.');
   const size=original.size||0;
   if(size>1024*1024*1024)throw new Error('This video exceeds the 1 GB source limit.');
-  if(/iPhone|iPad|iPod/.test(navigator.userAgent)|| (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)){if(size>350*1024*1024)toast('Large iPhone/iPad conversion: using file-backed input to reduce memory, but Safari may still terminate conversion because output and codec buffers require memory.',8000);}
   if(!navigator.onLine)throw new Error('Internet access is needed to download the optional browser decoder.');
   checkConversionCancelled();
-  const {ff}=await loadBrowserFFmpeg();
-  checkConversionCancelled();
-  activeConversionFFmpeg=ff;
   conversionRunning=true;
-  const cancelBtn=$('#cancelConversion');if(cancelBtn){cancelBtn.disabled=false;cancelBtn.textContent='Cancel conversion';}
-  const ext=((original.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8)||'bin';
-  const input='input.'+ext,output='compatible.mp4';
-  const ffLogs=[];
-  const conversionStartedAt=Date.now();
-  let latestProgress=null;
-
-    const updateProgress=()=>{
-    const elapsed=Math.floor((Date.now()-conversionStartedAt)/1000);
-    const mins=Math.floor(elapsed/60);
-    const secs=String(elapsed%60).padStart(2,'0');
-
-    const percent=latestProgress===null
-      ? 0
-      : Math.round(latestProgress*100);
-
-    let etaText='Estimating time remaining...';
-
-    if(latestProgress!==null && latestProgress>0.01){
-      const remaining=Math.max(
-        0,
-        Math.round(elapsed*(1-latestProgress)/latestProgress)
-      );
-      const etaMins=Math.floor(remaining/60);
-      const etaSecs=String(remaining%60).padStart(2,'0');
-      etaText='About '+etaMins+':'+etaSecs+' remaining';
-    }
-
-    showConversionBusy(
-      'Converting '+(original.name||'video')+'… '+percent+'%'+
-      ' · '+mins+':'+secs+' elapsed'+
-      ' · '+etaText,
-      latestProgress===null?0:percent
-    );
-  }
-
-  const progressHandler=({progress}={})=>{
-    if(typeof progress==='number'&&Number.isFinite(progress)){
-      latestProgress=Math.max(0,Math.min(1,progress));
-    }
-    updateProgress();
+  const name=original.name||'video';
+  const started=Date.now();
+  let ratio=null,timer=0,ff=null;
+  const logs=[];
+  const paint=()=>{
+    if(!conversionRunning||conversionWasCancelled())return;
+    const el=Math.floor((Date.now()-started)/1000),pc=ratio===null?0:Math.round(ratio*100);
+    let eta='Estimating time remaining...';
+    if(ratio!==null&&ratio>0.01){const r=Math.max(0,Math.round(el*(1-ratio)/ratio));eta='About '+Math.floor(r/60)+':'+String(r%60).padStart(2,'0')+' remaining';}
+    showConversionBusy('Converting '+name+'… '+pc+'% · '+Math.floor(el/60)+':'+String(el%60).padStart(2,'0')+' elapsed · '+eta,pc);
   };
-
-  const progressTimer=setInterval(updateProgress,1000);
-
-  const logHandler=({message=''}={})=>{
-    if(message)ffLogs.push(message);
-  };
-  let mounted=false;
-  let inputPath=input;
+  const input='input.'+(((name.split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8))||'bin'),output='compatible.mp4';
   try{
+    showConversionBusy('Loading the video converter… (first time only, about 25 MB)',0);
+    ff=await raceCancel(getFFmpegInstance(),120000,'The video converter took too long to download. Check your connection and try again.');
     checkConversionCancelled();
-    ff.on('log',logHandler);
-    ff.on('progress',progressHandler);
-    /* WORKERFS lets FFmpeg read the original File/Blob without first copying the entire source into a JS Uint8Array and the WASM filesystem. This reduces peak memory on iOS; it cannot eliminate memory needed by the decoder or final output. */
-    try{
-      const sourceFile=(typeof File!=='undefined'&&original instanceof File)?original:new File([original],(original.name||input),{type:original.type||'application/octet-stream'});
-      ff.mount('WORKERFS',{files:[sourceFile]},'/source');
-      mounted=true;
-      inputPath='/source/'+sourceFile.name.replace(/[\/]/g,'_');
-    }catch(mountErr){
-      /* On iOS, do not silently allocate a full-size Uint8Array copy: that defeats the low-memory path and can kill Safari. Fail clearly instead. On other browsers retain the compatibility fallback. */
-      const onIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-      if(onIOS)throw new Error('This Safari version could not mount the source file in low-memory mode (WORKERFS). For safety, the app did not copy the whole video into memory. Reload the updated site and try again; if this repeats, this browser decoder build is not compatible with this iOS version.');
-      await ff.writeFile(input,new Uint8Array(await original.arrayBuffer()));
-      inputPath=input;
-    }
-    /* Probe stream descriptions during input parsing. MP4 can carry text subtitles as mov_text, but cannot preserve bitmap subtitle formats such as PGS/VobSub as native selectable MP4 tracks. */
-    await ff.exec(['-hide_banner','-i',inputPath]).catch(()=>-1); // Input-only probe exits immediately after listing streams.
+    ff.setLogger(({message})=>{if(message){logs.push(message);if(logs.length>40)logs.shift();}});
+    ff.setProgress(({ratio:r})=>{if(typeof r==='number'&&isFinite(r))ratio=Math.max(0,Math.min(1,r));});
+    timer=setInterval(paint,500);
+    showConversionBusy('Reading '+name+' into the converter…',0);
+    const bytes=new Uint8Array(await raceCancel(original.arrayBuffer(),0));
     checkConversionCancelled();
-    const textSubtitleCodecs=new Set(['subrip','srt','ass','ssa','webvtt','text','mov_text']);
-    const subtitleMaps=[];
-    for(const line of ffLogs){
-      const m=line.match(/Stream #0:(\d+)(?:\([^)]*\))?: Subtitle: ([^,\s]+)/i);
-      if(m&&textSubtitleCodecs.has(m[2].toLowerCase()))subtitleMaps.push(m[1]);
-    }
-    const args=['-y','-i',inputPath,'-map','0:v:0','-map','0:a?'];
-    for(const streamIndex of [...new Set(subtitleMaps)])args.push('-map','0:'+streamIndex);
-    /* Limit encoder/filter parallelism to reduce peak memory. Cap output at 1920px wide to prevent 4K output buffers/files from ballooning on iPhone/iPad; source input remains file-backed. This is still best-effort: FFmpeg.wasm keeps the output in WASM memory, so 1 GB is an accepted source ceiling, not a guarantee every device can finish it. */
-    args.push('-dn','-vf',"scale='min(1920,iw)':-2",'-threads','1','-filter_threads','1','-c:v','libx264','-preset','ultrafast','-crf','25','-pix_fmt','yuv420p','-c:a','aac','-b:a','160k','-c:s','mov_text','-movflags','+faststart',output);
-    /* Keep the probe output until conversion begins; it is useful when reporting failures on iOS Safari. */
-    ffLogs.length=0;
-    showConversionBusy('Starting video conversion… 0% · Estimating time remaining…',0);
-    const code=await ff.exec(args);
+    ff.FS('writeFile',input,bytes);
+    paint();
+    await raceCancel(ff.run('-i',input,'-map','0:v:0','-map','0:a?','-sn','-dn',
+      '-vf',"scale='min(1920,iw)':-2",'-threads','1',
+      '-c:v','libx264','-preset','ultrafast','-crf','25','-pix_fmt','yuv420p',
+      '-c:a','aac','-b:a','160k','-movflags','+faststart','-y',output),0);
     checkConversionCancelled();
-    if(code!==0){
-      const tail=ffLogs.slice(-8).map(x=>x.trim()).filter(Boolean).join(' | ').slice(-700);
-      throw new Error('FFmpeg could not convert this MKV/codec combination (exit '+code+').'+(tail?' Decoder details: '+tail:'')+' Bitmap subtitles such as PGS/VobSub are not supported as selectable MP4 tracks by this fallback.');
+    let out=null;
+    try{out=ff.FS('readFile',output);}catch(_){}
+    if(!out||!out.length){
+      const tail=logs.slice(-6).map(x=>x.trim()).filter(Boolean).join(' | ').slice(-500);
+      throw new Error('The converter could not convert this file.'+(tail?' Details: '+tail:''));
     }
-    const out=await ff.readFile(output);
-    if(!out||!out.length)throw new Error('Conversion produced an empty video.');
-    const u=URL.createObjectURL(new Blob([out],{type:'video/mp4'}));
+    const u=URL.createObjectURL(new Blob([out.buffer.slice(out.byteOffset,out.byteOffset+out.byteLength)],{type:'video/mp4'}));
     transcodeURLCache.set(fileId,u);
     showConversionBusy('Conversion complete · 100%',100);
     return u;
   }catch(err){
     const message=(err&&err.message)||String(err)||'unknown conversion error';
-    if(conversionWasCancelled()||/cancelled|terminated/i.test(message))throw new Error('Conversion cancelled. The original video was kept unchanged.');
-    if(/memory|allocate|out of bounds|abort\(|oom/i.test(message))throw new Error('Safari ran out of memory while converting this video. The source is within the configured 1 GB limit, but iOS cannot guarantee conversion at that size. Try a smaller file or lower-resolution source. Original file was not changed. Details: '+message);
+    if(conversionWasCancelled()||/cancelled/i.test(message))throw new Error(CANCEL_MSG);
+    if(/memory|allocate|out of bounds|abort\(|oom/i.test(message)){killFFmpeg();throw new Error('The browser ran out of memory converting this video. Try a smaller or lower-resolution file. The original was not changed.');}
+    killFFmpeg(); /* a failed run leaves the converter in an unknown state, so start fresh next time */
     throw err;
   }finally{
-    try{ff.off('log',logHandler);}catch(_){}
-    try{ff.off('progress',progressHandler);}catch(_){}
-    clearInterval(progressTimer);
-    try{if(mounted)ff.unmount('/source');}catch(_){}
-    try{await ff.deleteFile(input);}catch(_){}
-    try{await ff.deleteFile(output);}catch(_){}
-    if(activeConversionFFmpeg===ff)activeConversionFFmpeg=null;
+    clearInterval(timer);
+    try{if(ff&&ffmpegInstance===ff){ff.setProgress(()=>{});ff.setLogger(()=>{});try{ff.FS('unlink',input);}catch(_){}try{ff.FS('unlink',output);}catch(_){}}}catch(_){}
     conversionRunning=false;
     const cb=$('#cancelConversion');if(cb){cb.disabled=false;cb.textContent='Cancel conversion';}
   }
@@ -4409,7 +4328,7 @@ try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 </div>
 <section id="iptvStudio" aria-label="Real IPTV channels">
  <div class="iptv-top"><div><h1 style="margin:0">Real IPTV Channels</h1><div style="color:var(--muted,#666);font-size:13px">Imported playlists are kept separately from Fake Channels.</div></div><button class="iptv-btn" id="iptvBack">← Choose mode</button></div>
- <div class="iptv-tools"><button class="iptv-btn primary" id="iptvPick">Import playlist file</button><button class="iptv-btn" id="iptvCancelReading" disabled>Cancel import</button><input id="iptvFile" type="file" accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain" hidden><button class="iptv-btn" id="iptvExport">Export imported channels</button><button class="iptv-btn" id="iptvShowRecordings">Recordings</button></div>
+ <div class="iptv-tools"><button class="iptv-btn primary" id="iptvPick">Import playlist file</button><button class="iptv-btn" id="iptvCancelReading" disabled>Cancel import</button><input id="iptvFile" type="file" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" tabindex="-1"><button class="iptv-btn" id="iptvExport">Export imported channels</button><button class="iptv-btn" id="iptvShowRecordings">Recordings</button></div>
  <label for="iptvUrl">Playlist URL</label><div class="iptv-tools"><input class="iptv-input" id="iptvUrl" type="url" placeholder="https://example.com/playlist.m3u" autocapitalize="off" spellcheck="false"><button class="iptv-btn primary" id="iptvLoadUrl">Import URL</button><button class="iptv-btn" id="iptvOpenUrl" type="button">Open URL in Safari</button></div>
  <div id="iptvMsg" role="status">Import a playlist file or paste a direct playlist URL. URL imports may be blocked by the playlist host's browser-access policy (CORS).</div>
  <video id="iptvVideo" controls playsinline webkit-playsinline preload="metadata"></video>
@@ -4456,11 +4375,44 @@ function save(){/* each channel is saved directly to IndexedDB; no whole-library
 function makeChannel(name,group,url){return{id:'iptv-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10),name:name||url,group:group||'',url,selected:false};}
 let previewPage=0;const PREVIEW_PAGE_SIZE=50;let previewQuery='';let importBusy=false;let cancelImportRequested=false;let activeImportReader=null;let channelPage=0;const CHANNEL_PAGE_SIZE=50;
 async function parseM3UStream(stream,baseURL,label){
- const reader=stream.getReader(),decoder=new TextDecoder();activeImportReader=reader;let carry='',name='',group='',lineCount=0,found=0,batch=[],lastReport=0;
- const flush=async()=>{if(!batch.length)return;await putBatch('staging',batch);batch=[];};
- function parseLine(raw){const line=raw.trim();if(!line)return;if(/^#EXTINF/i.test(line)){const comma=line.indexOf(',');name=comma>=0?line.slice(comma+1).trim():'';const g=line.match(/(?:group-title|group)\s*=\s*"([^"]*)"/i);group=g?g[1]:'';if(!name){const n=line.match(/tvg-name\s*=\s*"([^"]*)"/i);if(n)name=n[1];}return;}if(line[0]==='#')return;let url='';try{url=baseURL?new URL(line,baseURL).href:(/^https?:\/\//i.test(line)?line:'');}catch(_){}if(/^https?:\/\//i.test(url)){batch.push({url,id:'iptv-'+Math.random().toString(36).slice(2)+Date.now().toString(36),name:name||line,group,selected:true});found++;}name='';group='';}
- try{while(true){const {value,done}=await reader.read();if(done)break;carry+=decoder.decode(value,{stream:true});let ix;while((ix=carry.indexOf('\n'))>=0){parseLine(carry.slice(0,ix).replace(/\r$/,''));carry=carry.slice(ix+1);lineCount++;if(batch.length>=200)await flush();if(lineCount-lastReport>=20000){lastReport=lineCount;msg(`Reading ${label}: ${lineCount.toLocaleString()} lines processed; ${found.toLocaleString()} channel entries found. Saving in small batches…`);await new Promise(r=>setTimeout(r,0));}}}if(cancelImportRequested){batch=[];await clearStaging();return{lines:lineCount,found,cancelled:true};}carry+=decoder.decode();if(carry)parseLine(carry);await flush();}
- finally{activeImportReader=null;reader.releaseLock();}
+ const reader=stream.getReader(),decoder=new TextDecoder('utf-8');activeImportReader=reader;
+ let carry='',name='',group='',lineCount=0,found=0,batch=[],lastReport=0;
+ const flush=async()=>{if(!batch.length)return;const b=batch;batch=[];await putBatch('staging',b);};
+ function parseLine(raw){
+  const line=raw.trim();if(!line)return;
+  if(line.charCodeAt(0)===35){
+   if(/^#EXTINF/i.test(line)){
+    const q=line.lastIndexOf('"'),comma=line.indexOf(',',q>=0?q:0);
+    name=comma>=0?line.slice(comma+1).trim():'';
+    const g=line.match(/group-title\s*=\s*"([^"]*)"/i);group=g?g[1]:'';
+    if(!name){const n=line.match(/tvg-name\s*=\s*"([^"]*)"/i);if(n)name=n[1];}
+   }else if(/^#EXTGRP:/i.test(line)&&!group){group=line.slice(8).trim();}
+   return;
+  }
+  let url='';
+  try{url=baseURL?new URL(line,baseURL).href:line;}catch(_){name='';group='';return;}
+  if(/^https?:\/\//i.test(url)){batch.push({url,id:'iptv-'+Math.random().toString(36).slice(2)+Date.now().toString(36),name:name||line,group,selected:true});found++;}
+  name='';group='';
+ }
+ try{
+  while(true){
+   if(cancelImportRequested)break;
+   const {value,done}=await reader.read();if(done)break;
+   carry+=decoder.decode(value,{stream:true});
+   carry=carry.replace(/\r\n?/g,'\n');
+   /* walk the chunk with an index (slicing after every line made big playlists crawl and look stuck) */
+   let pos=0,ix;
+   while((ix=carry.indexOf('\n',pos))>=0){parseLine(carry.slice(pos,ix));pos=ix+1;lineCount++;}
+   carry=carry.slice(pos);
+   if(batch.length)await flush();
+   if(lineCount-lastReport>=5000){lastReport=lineCount;msg(`Reading ${label}: ${lineCount.toLocaleString()} lines processed; ${found.toLocaleString()} channel entries found…`);}
+   await new Promise(r=>setTimeout(r,0));
+  }
+  if(cancelImportRequested){batch=[];await clearStaging();return{lines:lineCount,found,cancelled:true};}
+  carry+=decoder.decode();
+  if(carry)parseLine(carry);
+  await flush();
+ }finally{activeImportReader=null;try{reader.releaseLock();}catch(_){}}
  return{lines:lineCount,found,cancelled:false};
 }
 async function clearStaging(){const d=await openChannelDB();await new Promise((resolve,reject)=>{const tx=d.transaction('staging','readwrite');tx.objectStore('staging').clear();tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
@@ -4477,7 +4429,27 @@ function streamFile(file){if(file.stream)return file.stream();if(typeof Readable
 $('iptvPick').addEventListener('click',()=>$('iptvFile').click());$('iptvCancelReading').addEventListener('click',()=>{if(importBusy){cancelImportRequested=true;msg('Cancelling import and clearing temporary playlist data…');if(activeImportReader)activeImportReader.cancel().catch(()=>{});}});
 $('iptvFile').addEventListener('change',async e=>{const f=e.target.files&&e.target.files[0];if(!f)return;try{await stageImport(streamFile(f),f.name,undefined);}catch(err){msg('Could not read playlist: '+err.message);}e.target.value='';});
 $('iptvOpenUrl').addEventListener('click',()=>{const raw=$('iptvUrl').value.trim();if(!/^https?:\/\//i.test(raw)){msg('Enter a valid http:// or https:// URL first.');return;}window.open(raw,'_blank','noopener');msg('Opened the link in a new Safari tab if pop-ups are allowed. If it displays playlist text, use Share > Save to Files, then import the saved file here. Opening a link does not bypass CORS.');});
-$('iptvLoadUrl').addEventListener('click',async()=>{let url=$('iptvUrl').value.trim();if(!/^https?:\/\//i.test(url)){msg('Enter a valid http:// or https:// playlist URL.');return;}try{url=new URL(url).href;}catch(_){msg('That URL is not valid.');return;}msg('Fetching playlist as a stream…');try{const r=await fetch(url,{mode:'cors',credentials:'omit',cache:'no-store',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status+' ('+r.statusText+')');if(!r.body)throw new Error('This browser does not expose a streaming response reader');await stageImport(r.body,url,url);}catch(e){msg('Safari could not stream this playlist ('+(e&&e.message||String(e))+'). The host may block cross-origin reads (CORS). If the URL opens in Safari, save it to Files and import the saved file.');}});
+$('iptvLoadUrl').addEventListener('click',async()=>{
+ let url=$('iptvUrl').value.trim();
+ if(!/^https?:\/\//i.test(url)){msg('Enter a valid http:// or https:// playlist URL.');return;}
+ try{url=new URL(url).href;}catch(_){msg('That URL is not valid.');return;}
+ if(importBusy)return;
+ msg('Fetching playlist…');
+ const attempt=async u=>{const r=await fetch(u,{mode:'cors',credentials:'omit',cache:'no-store',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status);return r;};
+ let r=null,err1='';
+ try{r=await attempt(url);}catch(e){err1=(e&&e.message)||String(e);}
+ if(!r){
+  if(location.protocol==='https:'&&/^http:\/\//i.test(url))err1+=' - this page is HTTPS so it cannot load http:// links; try the https:// version';
+  if(!confirm('TV Studio could not read this playlist directly ('+err1+'). This is usually because the playlist host blocks browser access (CORS).\n\nTry again through a public CORS proxy (corsproxy.io)? The proxy will see the playlist URL, including any username, password or token in it. Press OK only if you are happy to share it that way.')){msg('Could not read the playlist ('+err1+'). If the link opens in Safari, save it to Files and use Import playlist file instead.');return;}
+  msg('Trying through the proxy…');
+  try{r=await attempt('https://corsproxy.io/?url='+encodeURIComponent(url));}catch(e){msg('The proxy could not read it either ('+((e&&e.message)||e)+'). Save the playlist to Files and use Import playlist file instead.');return;}
+ }
+ try{
+  let body=r.body;
+  if(!body){const t=await r.text();body=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(t));c.close();}});}
+  await stageImport(body,url,url);
+ }catch(e){msg('Playlist import failed: '+((e&&e.message)||e));}
+});
 function refreshIPTVTracks(){const v=$('iptvVideo'),tools=$('iptvTrackTools'),a=$('iptvAudioTrack'),t=$('iptvSubtitleTrack');if(!v||!tools)return;const at=v.audioTracks,tt=v.textTracks;a.innerHTML='<option value="-1">Default audio</option>';t.innerHTML='<option value="-1">Off / default</option>';let ac=0,tc=0;if(at&&at.length){for(let i=0;i<at.length;i++){const tr=at[i],o=document.createElement('option');o.value=String(i);o.textContent=tr.label||tr.language||('Audio '+(i+1));a.appendChild(o);ac++;}}if(tt&&tt.length){for(let i=0;i<tt.length;i++){const tr=tt[i],o=document.createElement('option');o.value=String(i);o.textContent=tr.label||tr.language||('Subtitle '+(i+1));t.appendChild(o);tc++;}}tools.style.display='flex';a.disabled=!ac;t.disabled=!tc;if(!ac&&!tc)msg('Safari does not expose selectable audio/subtitle tracks for this stream.');}
 $('iptvVideo').addEventListener('loadedmetadata',refreshIPTVTracks);$('iptvVideo').addEventListener('loadeddata',refreshIPTVTracks);$('iptvAudioTrack').addEventListener('change',()=>{const a=$('iptvVideo').audioTracks;if(!a)return;const n=Number($('iptvAudioTrack').value);for(let i=0;i<a.length;i++)a[i].enabled=n<0?i===0:i===n;});$('iptvSubtitleTrack').addEventListener('change',()=>{const t=$('iptvVideo').textTracks;if(!t)return;const n=Number($('iptvSubtitleTrack').value);for(let i=0;i<t.length;i++)t[i].mode=n===i?'showing':'disabled';});
 $('iptvExport').addEventListener('click',async()=>{try{const db=await openChannelDB(),parts=['#EXTM3U\n'];await new Promise((resolve,reject)=>{const req=db.transaction('items','readonly').objectStore('items').openCursor();req.onsuccess=()=>{const c=req.result;if(!c){resolve();return;}const x=c.value;parts.push(`#EXTINF:-1${x.group?' group-title="'+String(x.group).replace(/["\r\n]/g,'')+'"':''},${String(x.name).replace(/[\r\n]/g,' ')}\n${x.url}\n`);c.continue();};req.onerror=()=>reject(req.error);});const blob=new Blob(parts,{type:'audio/x-mpegurl;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='tv-studio-iptv.m3u';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),3000);msg('Playlist export prepared.');}catch(e){msg('Export failed: '+e.message);}});
