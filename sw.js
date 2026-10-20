@@ -84,27 +84,21 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Other same-origin resources: serve cached copies when available
-  // and refresh them from the network.
+  // App code and styles must be network-first so GitHub Pages updates appear promptly.
+  // Fall back to the cached copy only when offline.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request);
+    const isAppCode = /\.(?:html?|js|mjs|css)(?:$|\?)/i.test(url.pathname + url.search) ||
+      url.pathname.endsWith('/') || url.pathname.endsWith('/index');
 
-    const network = fetch(request)
-      .then(response => {
-        if (response.ok && response.type === 'basic') {
-          cache.put(request, response.clone());
-        }
-
-        return response;
-      })
-      .catch(() => null);
-
-    if (cached) {
-      event.waitUntil(network);
-      return cached;
+    try {
+      const response = await fetch(request, { cache: isAppCode ? 'no-store' : 'no-cache' });
+      if (response.ok && response.type === 'basic') {
+        await cache.put(request, response.clone());
+      }
+      return response;
+    } catch (_) {
+      return (await cache.match(request)) || Response.error();
     }
-
-    return (await network) || Response.error();
   })());
 });
