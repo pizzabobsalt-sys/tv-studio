@@ -2,7 +2,7 @@
    Keeps the app shell available offline without caching live streams or recordings. */
 'use strict';
 
-const CACHE_NAME = 'tv-studio-shell-v2';
+const CACHE_NAME = 'tv-studio-shell-v4';
 const APP_SHELL = ['./', './index.html'];
 
 self.addEventListener('install', event => {
@@ -37,7 +37,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
 
   // Never cache live streams, media segments, or generated recording files.
-  if (/\.(m3u8|m3u|ts|m4s|mp4|webm|mp3|aac|wav|ogg)(?:$|\?)/i.test(url.pathname + url.search)) return;
+  if (/\.(m3u8|m3u|ts|m2ts|mts|m4s|mp4|m4v|webm|mkv|avi|mov|flv|wmv|mpg|mpeg|3gp|ogv|vob|mxf|mp3|m4a|aac|ac3|wav|ogg|mka)(?:$|\?)/i.test(url.pathname + url.search)) return;
   if (request.headers.has('range')) return;
 
   if (request.mode === 'navigate') {
