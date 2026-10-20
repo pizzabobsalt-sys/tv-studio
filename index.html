@@ -3128,28 +3128,44 @@ async function transcodeForBrowser(fileId,sourceURL){
   const original=await getFile(fileId);
   if(!original)throw new Error('The original video file is unavailable.');
   const size=original.size||0;
-  if(size>1024*1024*1024)throw new Error('This video is too large for safe in-browser conversion (limit: 1 GB). Larger files can exceed browser/WebAssembly memory limits.');
+  if(size>1024*1024*1024)throw new Error('This video exceeds the 1 GB source limit.');
+  if(/iPhone|iPad|iPod/.test(navigator.userAgent)|| (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)){if(size>350*1024*1024)toast('Large iPhone/iPad conversion: using file-backed input to reduce memory, but Safari may still terminate conversion because output and codec buffers require memory.',8000);}
   if(!navigator.onLine)throw new Error('Internet access is needed to download the optional browser decoder.');
   const {ff}=await loadBrowserFFmpeg();
   const ext=((original.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8)||'bin';
   const input='input.'+ext,output='compatible.mp4';
-  const bytes=new Uint8Array(await original.arrayBuffer());
   const ffLogs=[];
   const logHandler=({message=''})=>{if(message)ffLogs.push(message);};
+  let mounted=false;
+  let inputPath=input;
   try{
-    await ff.writeFile(input,bytes);
     ff.on('log',logHandler);
+    /* WORKERFS lets FFmpeg read the original File/Blob without first copying the entire source into a JS Uint8Array and the WASM filesystem. This reduces peak memory on iOS; it cannot eliminate memory needed by the decoder or final output. */
+    try{
+      const sourceFile=(typeof File!=='undefined'&&original instanceof File)?original:new File([original],(original.name||input),{type:original.type||'application/octet-stream'});
+      ff.mount('WORKERFS',{files:[sourceFile]},'/source');
+      mounted=true;
+      inputPath='/source/'+sourceFile.name.replace(/[\/]/g,'_');
+    }catch(mountErr){
+      /* On iOS, do not silently allocate a full-size Uint8Array copy: that defeats the low-memory path and can kill Safari. Fail clearly instead. On other browsers retain the compatibility fallback. */
+      const onIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+      if(onIOS)throw new Error('This Safari version could not mount the source file in low-memory mode (WORKERFS). For safety, the app did not copy the whole video into memory. Reload the updated site and try again; if this repeats, this browser decoder build is not compatible with this iOS version.');
+      await ff.writeFile(input,new Uint8Array(await original.arrayBuffer()));
+      inputPath=input;
+    }
     /* Probe stream descriptions during input parsing. MP4 can carry text subtitles as mov_text, but cannot preserve bitmap subtitle formats such as PGS/VobSub as native selectable MP4 tracks. */
-    await ff.exec(['-hide_banner','-i',input]).catch(()=>-1); // Input-only probe exits immediately after listing streams.
+    await ff.exec(['-hide_banner','-i',inputPath]).catch(()=>-1); // Input-only probe exits immediately after listing streams.
     const textSubtitleCodecs=new Set(['subrip','srt','ass','ssa','webvtt','text','mov_text']);
     const subtitleMaps=[];
     for(const line of ffLogs){
       const m=line.match(/Stream #0:(\d+)(?:\([^)]*\))?: Subtitle: ([^,\s]+)/i);
       if(m&&textSubtitleCodecs.has(m[2].toLowerCase()))subtitleMaps.push(m[1]);
     }
-    const args=['-y','-i',input,'-map','0:v:0','-map','0:a?'];
+    const args=['-y','-i',inputPath,'-map','0:v:0','-map','0:a?'];
     for(const streamIndex of [...new Set(subtitleMaps)])args.push('-map','0:'+streamIndex);
-    args.push('-dn','-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-c:s','mov_text','-movflags','+faststart',output);
+    /* Limit encoder/filter parallelism to reduce peak memory. Cap output at 1920px wide to prevent 4K output buffers/files from ballooning on iPhone/iPad; source input remains file-backed. This is still best-effort: FFmpeg.wasm keeps the output in WASM memory, so 1 GB is an accepted source ceiling, not a guarantee every device can finish it. */
+    args.push('-dn','-vf',"scale='min(1920,iw)':-2",'-threads','1','-filter_threads','1','-c:v','libx264','-preset','ultrafast','-crf','25','-pix_fmt','yuv420p','-c:a','aac','-b:a','160k','-c:s','mov_text','-movflags','+faststart',output);
+    /* Keep the probe output until conversion begins; it is useful when reporting failures on iOS Safari. */
     ffLogs.length=0;
     const code=await ff.exec(args);
     if(code!==0){
@@ -3161,8 +3177,13 @@ async function transcodeForBrowser(fileId,sourceURL){
     const u=URL.createObjectURL(new Blob([out],{type:'video/mp4'}));
     transcodeURLCache.set(fileId,u);
     return u;
+  }catch(err){
+    const message=(err&&err.message)||String(err)||'unknown conversion error';
+    if(/memory|allocate|out of bounds|abort\(|oom/i.test(message))throw new Error('Safari ran out of memory while converting this video. The source is within the configured 1 GB limit, but iOS cannot guarantee conversion at that size. Try a smaller file or lower-resolution source. Original file was not changed. Details: '+message);
+    throw err;
   }finally{
     try{ff.off('log',logHandler);}catch(_){}
+    try{if(mounted)ff.unmount('/source');}catch(_){}
     try{await ff.deleteFile(input);}catch(_){}
     try{await ff.deleteFile(output);}catch(_){}
   }
@@ -3178,6 +3199,16 @@ async function loadItem(info,t){
   if(t!==P.token)return;
   if(!url){markBad(it,true,'file is missing');setMode('bars');return;}
   let wd=0,tries=0,triedAlt=false,triedTranscode=false;
+  const iosSafari=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(iosSafari&&!isNat(it.fileId)){
+    const stored=await getFile(it.fileId);
+    const ext=((stored&&stored.name)||it.name||'').split('.').pop().toLowerCase();
+    if(!['mp4','m4v','mov'].includes(ext)){ 
+      triedTranscode=true;setMode('loading');toast('Preparing a compatible MP4 in low-memory mode. Large conversions may still exceed iOS memory.',7000);
+      try{url=await transcodeForBrowser(it.fileId,url);if(t!==P.token)return;}
+      catch(err){if(t!==P.token)return;const why=(err&&err.message)||String(err)||'conversion failed';markBad(it,true,'Safari iOS browser conversion failed: '+why+' If this mentions out of memory, Safari cannot safely finish this file client-side; use server-side conversion to keep the 1 GB upload limit.');setMode('bars');return;}
+    }
+  }
   const arm=(ms=25000)=>{clearTimeout(wd);wd=setTimeout(()=>{if(t===P.token&&P.mode==='loading'){markBad(it,true,'took too long to open');setMode('bars');}},ms);};
   arm();
   vid.onloadedmetadata=()=>{
@@ -3202,8 +3233,8 @@ async function loadItem(info,t){
         if(t!==P.token)return;clearTimeout(wd);url=converted;setMode('loading');arm(10*60*1000);vid.src=url;vid.load();
       }).catch(err=>{
         if(t!==P.token)return;clearTimeout(wd);
-        const why=(err&&err.message)||'conversion failed';
-        markBad(it,true,'native playback failed; compatibility conversion failed: '+why);
+        const why=(err&&err.message)||String(err)||'conversion failed';
+        markBad(it,true,'Safari/browser compatibility conversion failed: '+why);
         setMode('bars');
       });
       return;

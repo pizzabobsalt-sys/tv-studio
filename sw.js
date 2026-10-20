@@ -3,7 +3,7 @@
    Browser FFmpeg fallback is loaded on demand from its CDN and needs a network connection on first use. */
 'use strict';
 
-const CACHE_NAME = 'tv-studio-shell-v5';
+const CACHE_NAME = 'tv-studio-shell-v7';
 const APP_SHELL = ['./', './index.html'];
 
 self.addEventListener('install', event => {
